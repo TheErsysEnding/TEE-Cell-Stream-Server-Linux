@@ -1,0 +1,2 @@
+upstream commit: 68d84aa170971315469c0f8d21bc0e97ab2aedf7 (release 174-a5dd795, 2026-08-23)
+https://github.com/mohasi/ps3-dev  (Apache-2.0)

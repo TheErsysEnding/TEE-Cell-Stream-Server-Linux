@@ -1,0 +1,20 @@
+Package: tee-cell-stream-server
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: all
+Maintainer: TEE <github@teebug.de>
+Installed-Size: @INSTALLED_SIZE@
+Depends: python3 (>= 3.12), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-glib-2.0, python3-evdev, ffmpeg, gstreamer1.0-tools, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, xdg-desktop-portal, iproute2, xdg-utils, udev, libxkbcommon0
+Recommends: xdg-desktop-portal-gnome | xdg-desktop-portal-gtk, gnome-shell-extension-appindicator, x11-xserver-utils
+Homepage: https://github.com/mohasi/ps3-dev
+Description: TEE Cell Stream Server - stream the PC desktop to a PS3 (cell-stream)
+ Linux port of cell-stream-server: captures the desktop (xdg-desktop-portal /
+ PipeWire, X11 fallback), encodes H.264 on the GPU (NVENC, VA-API) or CPU
+ (x264), streams it over UDP to a PS3 running the cell-stream homebrew app
+ (720p60, ~25 ms), sends the PC's sound along, and turns the PS3 controller
+ into a virtual Xbox 360 gamepad or into mouse and keyboard on the PC.
+ .
+ Modern GTK4/libadwaita window with tray icon; the PS3 finds the server on
+ its own (discovery beacon). Wire protocol identical to the Windows original
+ (ps3-dev release 174-a5dd795, Apache-2.0).

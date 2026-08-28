@@ -1,0 +1,83 @@
+tee-cell-stream-server (1.5.1) unstable; urgency=medium
+
+  * Kritisch in der Bildtaktung von 1.5.0: im Ueberlauf-Zweig galt ein Zeitfenster
+    schon als verpasst, sobald die fruehe Kante des NAECHSTEN Takts erreicht war,
+    statt sein eigener Taktpunkt. Das Fenster ist aber der Spielraum, ein Bild
+    frueher zu senden - kein Termin. Dauerte ein Schreibvorgang laenger als
+    12,5 ms, wurden dadurch Bilder verworfen. Gefunden von der adversarialen
+    Gegenpruefung, mit Regressionstest abgesichert.
+  * Reader-Thread bindet seine Pufferliste jetzt selbst, statt dem Attribut zu
+    folgen - ein Reader, der den 2-Sekunden-Join ueberlebt, kann keinen Index in
+    die Puffer eines neuen Laufs mehr veroeffentlichen.
+  * Dokumentation berichtigt: die Taktung liefert 60 +-2 Bilder je Sekunde, nicht
+    "immer genau 60" - der Phasenregler folgt dem Takt der Quelle (SERVO_SLEW_
+    FRACTION 3,33 %). README, SPEC und die Messtabelle im Code entsprechend.
+  * Testdaten ohne Fingerabdruecke des Entwicklungsrechners (Monitormodell).
+
+ -- TEE <github@teebug.de>  Fri, 28 Aug 2026 02:00:00 +0200
+
+tee-cell-stream-server (1.5.0) unstable; urgency=medium
+
+  * Bildtaktung neu: die PS3 bekommt jetzt IMMER eine gleichmaessige Kadenz von
+    60 Bildern je Sekunde, egal wie viele die Bildschirmaufnahme liefert. GNOMEs
+    Aufnahme ist schadensgesteuert - ein ruhender Desktop (Terminal, Ladebild)
+    erzeugte nur ~18 Bilder je Sekunde, und die wurden seit 1.3.0 roh
+    durchgereicht: auf der Konsole ruckelig, mit roter Frametime-Anzeige.
+    Am echten Portal auf ruhendem Desktop gemessen: vorher ~18 fps, jetzt 60,9
+    fps bei 0 von 893 verlorenen Bildern. Quellraten 0/5/20/42/60/90/240 je
+    Sekunde ergeben alle 60 +-0,3 am Ausgang.
+  * Dabei behoben: die Ratenbegrenzung verbrauchte ein Bild, BEVOR sie ueber das
+    Senden entschied - ein abgelehntes Bild ging erst bis zu 100 ms spaeter als
+    Wiederholung raus statt sofort als echtes Bild. Aus einer echten Sitzung:
+    44522 Bilder von der Quelle, nur 42548 an den Encoder (4,4 % verloren).
+  * Protokoll-Hinweis, wenn die Aufnahme stillsteht, obwohl gestreamt wird -
+    mit beiden Auswegen (randloses Fenster oder die beiliegende Erweiterung).
+
+ -- TEE <github@teebug.de>  Fri, 28 Aug 2026 00:55:00 +0200
+
+tee-cell-stream-server (1.4.0) unstable; urgency=medium
+
+  * Die Desktop-Umschaltung waehlt nicht mehr die Streamgroesse, sondern den
+    kleinsten Modus mit genug Bildwiederholrate. GNOMEs Bildschirmaufnahme gibt
+    nur rund zwei Drittel der Bildwiederholrate heraus: an der echten PS3
+    gemessen 40,1 von 60 fps mit dem Desktop auf 1280x720@60, aber 60,1 fps mit
+    ihm auf 2560x1440@320 - obwohl der zweite Fall zusaetzlich 1440p auf 720p
+    herunterrechnen muss. 1280x720 kann auf den meisten Monitoren nur 60 Hz,
+    also kostete die originalgetreue 1:1-Umschaltung ein Drittel der Bilder.
+    Neu wird der kleinste Modus mit mindestens 1,5-facher Bildrate genommen
+    (hier 1920x1080@240): volle 60 fps bei 8,3 statt 14,7 MB je Bild, was die
+    Eingabeverzoegerung niedrig haelt. Auf einem reinen 60-Hz-Monitor bleibt es
+    beim bisherigen Verhalten.
+  * GNOME-Erweiterung beigelegt, die Mutters direct scanout abschaltet, solange
+    der Server laeuft - ohne sie friert die Aufnahme ein, sobald ein Spiel im
+    Vollbild laeuft (mutter#3074, #3903).
+
+ -- TEE <github@teebug.de>  Thu, 27 Aug 2026 20:45:00 +0200
+
+tee-cell-stream-server (1.3.0) unstable; urgency=medium
+
+  * Bitrate und Entropie-Codierung einstellbar; Standard jetzt 6 Mbit/s + CAVLC.
+    An der echten PS3 gemessen: Decodezeit 38-40 ms -> 19-20 ms pro Bild,
+    Latenz 55-60 ms -> 25-27 ms, keine verworfenen Bilder mehr.
+  * Bildtaktung folgt der Quelle statt einer eigenen 60-Hz-Uhr (die schwebte
+    gegen die 60 Hz des Compositors und erzeugte Doppler und Auslassungen).
+  * Sechs adversariale Code-Pruefungen: 55 Befunde behoben, darunter drei
+    kritische - die Ratenbegrenzung verzoegerte jedes Bild um bis zu 26 ms
+    statt eines zu ueberspringen; der Notfallpfad der Tonaufnahme nahm das
+    Mikrofon statt der Lautsprecher auf; ein Absturz im Integrationsklienten.
+  * Dateideskriptor-Leck im Portal-Pfad (3 je Freigabe) behoben.
+  * LICENSE und NOTICE ergaenzt, NOTICE wird mitgeliefert.
+
+ -- TEE <github@teebug.de>  Thu, 27 Aug 2026 17:00:00 +0200
+
+tee-cell-stream-server (1.0.0) unstable; urgency=medium
+
+  * Erste Version: Linux-Port von cell-stream-server (ps3-dev 174-a5dd795).
+    - Bildschirmaufnahme über xdg-desktop-portal/PipeWire (Wayland + GNOME-X11), X11-Fallback (x11grab)
+    - H.264 per NVENC, VA-API oder x264 mit den Original-Encoder-Einstellungen (Intra-Refresh, 720p60, 10 Mbit/s)
+    - Ton des PCs (PipeWire-Monitor) unkomprimiert wie im Original
+    - PS3-Controller als virtuelles Xbox-360-Gamepad (uinput) oder als Maus+Tastatur (Layout-korrekt via xkbcommon)
+    - Desktop-Umschaltung auf 1280x720 während des Streams (Mutter / xrandr), abschaltbar
+    - GTK4/libadwaita-Oberfläche, Tray-Symbol, Autostart, Custom Commands
+
+ -- TEE <github@teebug.de>  Thu, 27 Aug 2026 02:00:00 +0200

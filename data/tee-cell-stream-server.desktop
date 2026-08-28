@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=TEE Cell Stream Server
+Comment=Stream the PC desktop to a PS3 (cell-stream)
+Comment[de]=PC-Desktop zur PS3 streamen (cell-stream)
+Exec=tee-cell-stream-server
+Icon=tee-cell-stream-server
+Terminal=false
+Categories=Network;Game;
+Keywords=PS3;PlayStation;Stream;Streaming;Remote Play;cell-stream;Gamepad;Desktop;
+Keywords[de]=PS3;PlayStation;Stream;Streamen;Remote Play;cell-stream;Gamepad;Desktop;
+StartupWMClass=de.tee.CellStreamServer
+StartupNotify=true
+X-GNOME-UsesNotifications=true

@@ -1,0 +1,4 @@
+# TEE Cell Stream Server: the logged-in user creates the virtual Xbox 360 pad, mouse and keyboard through
+# /dev/uinput, so the device gets a uaccess ACL for the active seat (no group changes, no root).
+# Installed to /usr/lib/udev/rules.d/; the uinput module is loaded via modules-load.d.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

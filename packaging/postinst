@@ -1,0 +1,37 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+   configure)
+      # virtual gamepad: the udev rule hands /dev/uinput to the logged-in user (same mechanism Steam uses)
+      if command -v udevadm >/dev/null 2>&1; then
+         udevadm control --reload-rules 2>/dev/null || true
+         modprobe uinput 2>/dev/null || true
+         udevadm trigger --subsystem-match=misc --action=add 2>/dev/null || true
+      fi
+
+      # the extension only loads at the next login, and enabling is per user - so just say it once
+      if [ -d /usr/share/gnome-shell/extensions/tee-cell-stream-scanout@tee.local ]; then
+         echo "tee-cell-stream-server: für Vollbild-Spiele einmal ab- und anmelden, dann"
+         echo "  gnome-extensions enable tee-cell-stream-scanout@tee.local"
+      fi
+
+      if command -v update-desktop-database >/dev/null 2>&1; then
+         update-desktop-database -q /usr/share/applications 2>/dev/null || true
+      fi
+      if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+         gtk-update-icon-cache -q -f -t /usr/share/icons/hicolor 2>/dev/null || true
+      fi
+
+      # the PS3 talks to udp :38310; with ufw active nothing would get in, so open exactly that port
+      if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+         if ! ufw status 2>/dev/null | grep -q '38310/udp'; then
+            ufw allow 38310/udp comment 'TEE Cell Stream Server (PS3 cell-stream)' >/dev/null 2>&1 \
+               && echo "tee-cell-stream-server: ufw-Regel für udp 38310 angelegt (PS3 → PC)." \
+               || echo "tee-cell-stream-server: konnte udp 38310 in ufw nicht freigeben - bitte manuell: sudo ufw allow 38310/udp"
+         fi
+      fi
+      ;;
+esac
+
+exit 0

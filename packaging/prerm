@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+   remove|upgrade|deconfigure)
+      # a running server would keep udp :38310 and possibly the desktop at 720p; stop it cleanly
+      pkill -TERM -f 'python3 -m teecellstream' 2>/dev/null || true
+      ;;
+esac
+
+exit 0

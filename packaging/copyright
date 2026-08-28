@@ -1,0 +1,28 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: cell-stream-server (ps3-dev)
+Upstream-Contact: https://github.com/mohasi/ps3-dev
+Source: https://github.com/mohasi/ps3-dev/releases/tag/174-a5dd795
+
+Files: *
+Copyright: 2026 TEE <github@teebug.de> (Linux port)
+           2025-2026 mohasi (original cell-stream-server and cell-stream PS3 app)
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ use this file except in compliance with the License. You may obtain a copy of
+ the License at
+ .
+     http://www.apache.org/licenses/LICENSE-2.0
+ .
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ License for the specific language governing permissions and limitations under
+ the License.
+ .
+ On Debian systems, the complete text of the Apache License, Version 2.0 can
+ be found in "/usr/share/common-licenses/Apache-2.0".
+
+Files: usr/share/icons/hicolor/*/apps/tee-cell-stream-server.png
+Copyright: 2025-2026 mohasi
+License: Apache-2.0
+Comment: Application icon taken from the original cell-stream-server (cell-stream.ico).

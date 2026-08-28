@@ -1,0 +1,8 @@
+{
+  "uuid": "tee-cell-stream-scanout@tee.local",
+  "name": "TEE Cell Stream – Direktdurchreichung aus",
+  "description": "Schaltet Mutters direct scanout ab, solange der TEE Cell Stream Server läuft. Ohne das friert GNOMEs Bildschirmaufnahme ein, sobald ein Spiel im Vollbild direkt an den Monitor durchgereicht wird (mutter#3074, #3903) - die PS3 bekommt dann kein neues Bild mehr.",
+  "shell-version": ["48", "49", "50"],
+  "session-modes": ["user"],
+  "url": "https://github.com/TheErsysEnding"
+}

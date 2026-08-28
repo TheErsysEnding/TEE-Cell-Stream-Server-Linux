@@ -1,0 +1,45 @@
+TEE Cell Stream Server Linux
+Copyright 2026 TheErsysEnding
+
+This product includes software developed as part of the ps3-dev project
+(https://github.com/mohasi/ps3-dev), Copyright mohasi, licensed under the
+Apache License, Version 2.0.
+
+WHAT THIS PROJECT IS
+--------------------
+A Linux port of `cell-stream-server`, the Windows-side counterpart of the PS3
+homebrew application `cell-stream` from ps3-dev (release 174-a5dd795). It
+captures the desktop, encodes H.264, streams it to a PlayStation 3 over UDP and
+replays the console's controller on the PC.
+
+The PS3 application itself is NOT part of this repository and is NOT modified by
+it. This server speaks the same wire protocol so that the unmodified `cell-stream`
+package works with it.
+
+THIRD-PARTY MATERIAL INCLUDED HERE
+----------------------------------
+`upstream/` holds unmodified copies of the original sources, kept for reference
+so that this port can be checked against what it was ported from:
+
+  upstream/server/      C# sources of the original Windows server, its README
+                        and its build-ffmpeg.sh          (mohasi, Apache-2.0)
+  upstream/server/cell-stream.ico
+                        the original application icon    (mohasi, Apache-2.0)
+  upstream/ps3-app/     the PS3 application's README plus the source files that
+                        define the wire protocol (stream.c, stream.h,
+                        net-common.c, net-common.h)      (mohasi, Apache-2.0)
+  upstream/SOURCE.txt   which upstream commit these copies came from
+
+The application icons under `data/icons/` are derived from the original
+`cell-stream.ico` (mohasi, Apache-2.0); the grey/green status dots are original
+to this project.
+
+At runtime this project drives, but does not include or link, the following:
+FFmpeg, GStreamer, xdg-desktop-portal, PipeWire, GTK4 and libadwaita, all
+installed from the distribution's own packages.
+
+WHAT IS ORIGINAL TO THIS PROJECT
+--------------------------------
+Everything under `src/`, `tests/`, `packaging/` and `data/` other than the
+derived icons: the Python implementation, the Linux-specific capture, input,
+display and audio paths, the packaging, the test suite and the documentation.
