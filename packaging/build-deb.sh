@@ -45,6 +45,8 @@ install -m 644 "$ROOT/data/gnome-extension/metadata.json" "$ROOT/data/gnome-exte
    "$STAGE/usr/share/gnome-shell/extensions/$EXT_UUID/"
 
 # --- docs --------------------------------------------------------------------------------------------
+# the German guide is what a user of this package reads; the English README is the repo's front page
+install -D -m 644 "$ROOT/README.de.md" "$STAGE/usr/share/doc/$PKG/ANLEITUNG.md"
 install -D -m 644 "$ROOT/README.md" "$STAGE/usr/share/doc/$PKG/README.md"
 install -D -m 644 "$ROOT/packaging/copyright" "$STAGE/usr/share/doc/$PKG/copyright"
 # Apache-2.0 section 4(d): the NOTICE file travels with every distribution of the work

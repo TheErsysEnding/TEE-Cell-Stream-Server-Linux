@@ -18,3 +18,7 @@ Description: TEE Cell Stream Server - stream the PC desktop to a PS3 (cell-strea
  Modern GTK4/libadwaita window with tray icon; the PS3 finds the server on
  its own (discovery beacon). Wire protocol identical to the Windows original
  (ps3-dev release 174-a5dd795, Apache-2.0).
+ .
+ Needs a PS3 running HEN or CFW with the cell-stream homebrew installed - this
+ package is only the PC half. The interface and the bundled guide
+ (/usr/share/doc/tee-cell-stream-server/ANLEITUNG.md) are in German.

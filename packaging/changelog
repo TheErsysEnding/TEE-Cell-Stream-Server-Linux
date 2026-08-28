@@ -1,3 +1,12 @@
+tee-cell-stream-server (1.6.1) unstable; urgency=medium
+
+  * Englische README als Startseite des Projekts, deutsche Anleitung als
+    ANLEITUNG.md im Paket. Zwei Screenshots der Oberflaeche beigelegt.
+  * Paketbeschreibung nennt jetzt ausdruecklich, dass eine PS3 mit HEN/CFW und
+    der cell-stream-Homebrew noetig ist und dass die Oberflaeche deutsch ist.
+
+ -- TEE <github@teebug.de>  Fri, 28 Aug 2026 11:50:00 +0200
+
 tee-cell-stream-server (1.6.0) unstable; urgency=medium
 
   * Die mitgelieferte GNOME-Erweiterung schaltet sich jetzt von selbst ein: der

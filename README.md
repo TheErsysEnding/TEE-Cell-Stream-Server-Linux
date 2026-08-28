@@ -1,190 +1,123 @@
 # TEE Cell Stream Server Linux
 
-Streamt den Linux-Desktop live auf eine PS3 und schickt den PS3-Controller zurück an den PC — Remote Play
-in Gegenrichtung, wie Steam Remote Play/Moonlight, nur mit der PS3 als Client. Linux-Port des Windows-Tools
-`cell-stream-server` aus [ps3-dev](https://github.com/mohasi/ps3-dev) (Apache-2.0). Die PS3-App
-**cell-stream** (`cell-stream.pkg`, Release 174-a5dd795) bleibt unverändert: dieser Server spricht ihr
-Protokoll byte-genau.
+Stream your Linux desktop to a PlayStation 3 and play PC games with the PS3 controller — Remote Play the
+other way round. Linux port of the Windows tool `cell-stream-server` from
+[ps3-dev](https://github.com/mohasi/ps3-dev) (Apache-2.0). The PS3 side, the homebrew app **cell-stream**,
+is unchanged: this server speaks its wire protocol byte for byte.
 
-**Was heute geht (Kabel oder WLAN, 720p60):** 60 fps, ~25 ms vom Encoder bis zum Bild, Ton, und der
-Controller steuert den PC — als Maus und Tastatur oder als echtes Xbox-360-Gamepad, das Spiele als
-eingestecktes Pad sehen.
+*Deutsche Anleitung: [README.de.md](README.de.md)*
 
-## Installation (1 Klick)
+![The window](docs/fenster-server.png)
 
-```
-sudo apt install ./tee-cell-stream-server_1.4.0_all.deb
-```
+**Measured against a real console** (PS3 over Ethernet, Ryzen 9 5900X + RTX 4070 Ti SUPER, Ubuntu 26.04,
+GNOME 50 on Wayland):
 
-Alles Nötige (ffmpeg mit NVENC, GStreamer/PipeWire, GTK4/libadwaita, evdev, Portal) kommt aus den
-Ubuntu-Paketquellen. Das Paket richtet außerdem ein:
-
-- `/dev/uinput`-Zugriff für den angemeldeten Benutzer (udev-Regel, wie bei Steam) → virtuelles Gamepad
-- bei aktiver `ufw`-Firewall die Freigabe von **UDP 38310** (die PS3 spricht den Server darauf an)
-
-Auf der PS3 (HEN/CFW): `cell-stream.pkg` aus dem Release installieren.
-
-## Benutzung
-
-1. **TEE Cell Stream Server** aus dem App-Menü starten. Beim **ersten Start** fragt GNOME einmal, welcher
-   Bildschirm geteilt werden darf — bestätigen; die Entscheidung wird gespeichert (Restore-Token), danach
-   kommt der Dialog nicht wieder.
-2. Auf der PS3 die App **Cell Stream** starten. **Es gibt nichts zu drücken:** die PS3 findet den Server
-   selbst (Beacon), verbindet und streamt. Beide Seiten können in beliebiger Reihenfolge starten; fällt eine
-   weg, wartet die andere und verbindet neu.
-3. Fenster schließen lässt den Server im Hintergrund weiterlaufen (Tray-Symbol: grau = wartet,
-   grün = PS3 streamt). Beenden nur über Tray oder Menü → *Beenden*.
-
-Während des Streams gehen **alle Tasten an den PC**; die App nutzt SELECT als Modifikator:
-
-| Kombination | Wirkung |
+| | |
 |---|---|
-| SELECT + Kreuz | Eingabemodus: Maus+Tastatur ↔ Gamepad |
-| SELECT + Quadrat | Stream-Modus: vsync aus → vsync → vsync + 1 Frame Puffer |
-| SELECT + R3 | Statistik-Panel ein/aus |
-| SELECT + Dreieck/Kreis/L1/R1 | Custom-Befehl 1–4 (Reiter *Befehle*, Standard 1 = Steam Big Picture) |
-| START (nicht streamend) | App beenden |
+| Frame rate | 60 fps, longest gap 22 ms |
+| End-to-end latency | 25–30 ms |
+| Decode time on the PS3 | 19–20 ms per picture |
+| Dropped pictures | 0 of 893 |
 
-Maus-Modus: linker Stick = Zeiger, rechter Stick = Scrollen, Kreuz/Kreis/Quadrat = links/rechts/mitte,
-D-Pad = Pfeiltasten, START = Super-Taste. Dreieck öffnet die Bildschirmtastatur der PS3; die Zeichen werden
-am PC layoutkorrekt getippt (deutsches Layout wird berücksichtigt).
+## What you need
 
-## Einstellungen im Fenster
+- **A PS3 with HEN or CFW**, running `cell-stream.pkg` from the
+  [ps3-dev release](https://github.com/mohasi/ps3-dev/releases/tag/174-a5dd795). Without it there is
+  nothing to stream to — this package is only the PC half.
+- **A Linux desktop with a screen-sharing portal**: GNOME on Wayland is what this was built and measured
+  on; X11 works through a fallback. Everything else comes from your distribution's own packages.
+- **A GPU that encodes H.264** (NVIDIA NVENC or Intel/AMD VA-API), or a CPU fast enough for x264.
 
-- **Encoder**: NVIDIA (NVENC) → Intel/AMD (VA-API) → CPU (x264). Der erste funktionierende ist Standard;
-  die Wahl wird gemerkt. Während eine PS3 streamt, ist die Auswahl gesperrt.
-- **Bitrate** (Standard 6 Mbit/s) und **Entropie-Codierung** (Standard CAVLC): die beiden Regler, die
-  die Decodelast der PS3 bestimmen — siehe „Wenn die PS3 weniger als 60 fps zeigt".
-- **Fehlerkorrektur**: *Intra-Refresh* (Standard, wie Original) oder *Keyframes*. Der Original-Autor
-  beobachtete, dass NVENC-Intra-Refresh-Streams bei manchen Sessions die Decodezeit der PS3 hochkriechen
-  lassen — dann auf *Keyframes* wechseln.
-- **Desktop während des Streams umschalten**: der Server wählt den kleinsten Monitormodus, der der
-  Bildschirmaufnahme genug Bildwiederholrate lässt (siehe „Wenn die PS3 weniger als 60 fps zeigt"), und
-  stellt danach zurück. Abschaltbar; dann wird vom nativen Modus heruntergerechnet — mehr Daten je Bild
-  und damit etwas mehr Eingabeverzögerung.
-- **Sticks im Maus-Modus tauschen**, **Beim Anmelden starten** (minimiert in den Tray).
+## Install
 
-## Was auf Linux anders gelöst ist als im Windows-Original
+```
+sudo apt install ./tee-cell-stream-server_1.6.0_all.deb
+```
 
-| Windows | Linux |
+Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
+installed shell extensions when a session starts, and the bundled one is what keeps the capture alive
+while a game runs fullscreen. After that the server switches it on by itself.
+
+## Use it
+
+Start **TEE Cell Stream Server**, confirm the screen-share prompt once, then start **Cell Stream** on the
+PS3. There is nothing else to press: the console finds the server by itself (discovery beacon), connects
+and streams. Either side can be started first, and each reconnects on its own.
+
+While streaming, every button goes to the PC, so the PS3 app uses SELECT as its own modifier:
+
+| Combination | What it does |
 |---|---|
-| `ddagrab` (DirectX-Capture) | xdg-desktop-portal ScreenCast → PipeWire → GStreamer; X11: `x11grab` |
-| gebündeltes ffmpeg | Ubuntu-ffmpeg (`h264_nvenc`, identische Encoder-Argumente) |
-| WASAPI-Loopback | PipeWire-Sink-Monitor (`@DEFAULT_MONITOR@`) |
-| ViGEmBus-Treiber | `/dev/uinput` (Kernel) — kein Treiber |
-| `SendInput` | uinput-Maus/-Tastatur, Zeichen über libxkbcommon layoutkorrekt |
-| `ChangeDisplaySettings` | Mutter DisplayConfig (DBus), X11: `xrandr` |
-| Registry / Run-Key | `~/.config/tee-cell-stream-server/settings.json` / XDG-Autostart |
-| WinForms-Tray | StatusNotifierItem (Ubuntu-AppIndicator) |
+| SELECT + Cross | input mode: mouse+keyboard ↔ gamepad |
+| SELECT + Square | presentation mode: vsync off → vsync → vsync + one-frame buffer |
+| SELECT + R3 | show/hide the stats panel |
+| SELECT + Triangle/Circle/L1/R1 | custom commands 1–4 |
 
-## Wenn die PS3 weniger als 60 fps zeigt
+## Three things Linux needs that Windows does not
 
-Der Engpass ist fast immer **der Decoder der PS3**, nicht das Netzwerk. Die Konsole braucht pro Bild
-~20 ms zum Decodieren – mehr als die 16,7 ms, die bei 60 fps zwischen zwei Bildern liegen. Solange ihr
-Decoder sauber „pipelined", reicht es trotzdem für 60 fps; kippt das, halbiert sich die Rate
-(60-Hz-Ausgabe → 30 fps, **50-Hz-Ausgabe → 25 fps**).
+All three were measured on the console, not guessed. They are the reason a straight port of the Windows
+server runs at about 25 fps here while this one runs at 60.
 
-**1. Zahlen ablesen: SELECT + R3** blendet auf der PS3 die Statistik ein.
+**CAVLC instead of CABAC.** The PS3 decodes H.264 on its SPUs, where CABAC's serial arithmetic decoding is
+the expensive part. With CABAC the console needed 38–40 ms per picture — far past the 16.7 ms a 60 fps
+frame gets — so it dropped every other one. CAVLC at 6 Mbit/s brought that to 19–20 ms.
 
-| Wert | Gut | Bedeutung, wenn zu hoch |
-|---|---|---|
-| `decode` | < 16 ms | **Der Hauptverdächtige.** Über 16,7 ms schafft die PS3 keine 60 fps mehr und verwirft Bilder. |
-| `network` | 3–9 ms | Leitung/WLAN. Bei Kabel praktisch immer niedrig. |
-| `present` | ~0,6 ms | Übergabe an die Grafikeinheit. |
-| `display` | 0 ms | ~8–10 ms heißt: vsync ist an (kostet eine Bildwiederholung). |
-| `behind` | 0 | Zählt hoch = der Decoder kommt nicht mit und Bilder werden verworfen. |
-| `incomplete` | 0 | Zählt hoch = Paketverlust auf dem Weg zur PS3. |
-| `bitrate` | ≈ eingestellter Wert | Deutlich darüber heißt: der Encoder nutzt seinen Spielraum aus – Bitrate senken. |
+**The desktop's refresh rate decides the frame rate.** GNOME's screen cast hands out only about two thirds
+of the refresh rate: 40.1 of 60 fps with the desktop at 1280×720@60, but 60.1 fps at 2560×1440@320 — even
+though the second case also has to scale 1440p down to 720p. Since 1280×720 tops out at 60 Hz on most
+monitors, the Windows original's trick of matching the desktop to the stream size costs a third of the
+frames here. This server instead picks the smallest mode with at least 1.5× the frame rate.
 
-**2. Am PC nachstellen** (Reiter *Server*, wirkt beim nächsten Verbindungsaufbau — die Regler sind
-gesperrt, solange eine PS3 streamt):
+**Fullscreen games freeze the capture.** When Mutter hands a fullscreen window straight to the monitor
+(direct scanout) it stops compositing it, so the screen cast has nothing left to copy: the picture freezes
+while sound and input carry on ([mutter#3074](https://gitlab.gnome.org/GNOME/mutter/-/work_items/3074),
+[#3903](https://gitlab.gnome.org/GNOME/mutter/-/work_items/3903)). The bundled GNOME extension turns direct
+scanout off while the server runs and restores it afterwards.
 
-- **Entropie-Codierung → CAVLC** (Standard). Gemessen mit einem bewusst schwachen Decoder als Ersatzmaß
-  für die SPU-Decodierung der PS3: **−43 % Decodezeit** gegenüber CABAC bei gleicher Bitrate. Das ist der
-  wirksamste einzelne Hebel. CABAC ist etwas schärfer pro Bit, aber für die PS3 spürbar teurer.
-- **Bitrate senken** (Standard 6 Mbit/s statt der 10 Mbit/s des Windows-Originals). Der Original-Autor maß:
-  10 → 16 Mbit/s trieb die Decodezeit der PS3 von 20 auf 45 ms. Auf diesem PC gemessen: 10 Mbit/s CABAC
-  kostete 2,8 ms, 6 Mbit/s CAVLC nur 1,5 ms.
-- **Fehlerkorrektur → Keyframes**, falls das Bild über eine längere Sitzung schlechter wird. Der
-  Original-Autor beobachtete, dass NVENC-Intra-Refresh-Streams die Decodezeit der PS3 über eine Sitzung
-  hochkriechen lassen und Artefakte hinterlassen, die erst ein Neustart beseitigt.
+## What it does
 
-**2a. Der wichtigste Punkt: die Bildwiederholrate des Desktops.** GNOMEs Bildschirmaufnahme gibt nur rund
-**zwei Drittel** der Bildwiederholrate heraus. An der echten PS3 gemessen, gleiche Software und gleicher
-Inhalt: **40,1 fps** mit dem Desktop auf 1280×720@60, aber **60,1 fps** mit ihm auf 2560×1440@320 — obwohl
-der zweite Fall zusätzlich 1440p auf 720p herunterrechnen muss. Seit 1.4.0 wählt der Server deshalb nicht
-mehr die Streamgröße, sondern den **kleinsten Modus mit mindestens 1,5-facher Bildrate** (auf einem
-240-Hz-Monitor typischerweise 1920×1080@240). Steht im Protokoll als „schalte den Desktop dafür auf …".
-Auf einem reinen 60-Hz-Monitor ist nichts zu gewinnen; dort bleibt es bei 1280×720@60.
+Screen capture through xdg-desktop-portal/PipeWire (X11 fallback via `x11grab`), H.264 through NVENC,
+VA-API or x264 with the original's low-latency encoder settings (no B-frames, intra refresh, one slice),
+uncompressed desktop audio, and the PS3 controller replayed as either a virtual Xbox 360 gamepad
+(`/dev/uinput`) or as mouse and keyboard with correct keyboard-layout handling via libxkbcommon.
 
-**2b. Nachmessen, statt zu raten.** `tools/wire-fps.py` zählt die Bilder, die wirklich zur PS3 gehen,
-und sagt anhand der Abstände, ob die Quelle langsamer liefert oder ob Bilder verworfen werden:
+The window is GTK4/libadwaita with a tray icon, autostart and four user-defined commands the console can
+trigger. **Its interface is in German**, as is `README.de.md`; the code and its comments are in English.
+
+![Custom commands](docs/fenster-befehle.png)
+
+## When the PS3 shows fewer than 60 fps
+
+`README.de.md` has the full troubleshooting chapter. The short version: read the console's stats panel
+(SELECT + R3) and look at `decode`. Above 16.7 ms the PS3 cannot sustain 60 fps and starts dropping. The
+two settings that move it are **entropy coding** (CAVLC is ~43 % cheaper to decode) and **bitrate**.
+
+To measure what actually leaves for the console rather than guessing:
 
 ```
-sudo tools/wire-fps.py <IP-der-PS3> -d 30
+sudo tools/wire-fps.py <PS3-IP> -d 30
 ```
 
-Achtung: Auf der Leitung liegt seit `feed()` den Takt selbst hält eine **gleichmäßige** Kadenz nahe 60
-Bilder/s — ein unverändertes Bild wird einfach noch einmal geschickt (die PS3 will eine gleichmäßige
-Kadenz; eine schwankende kommt dort als Ruckeln an). „Nahe" heißt: liefert die Quelle selbst zwischen 58
-und 62 Bildern/s, rastet das Raster genau auf ihre Rate ein und die Leitung führt eben diese Rate — auf
-diesem PC misst GNOMEs ScreenCast 61,9/s, es liegen dort also 62 Bilder/s an (nachgemessen: Quelle 59/s →
-59,00/s auf der Leitung, 62/s → 62,00/s, alles außerhalb 58–62 → 60,00/s). Das ist der Preis dafür, dass
-ein neues Bild nicht auf sein Raster warten muss (Alter 1,9 ms statt 7,9 ms im Median).
-`wire-fps.py` zeigt also nicht mehr, wie viele Bilder die *Quelle* liefert —
-das steht am Ende jedes Streams im Protokoll: „… an ffmpeg: N neue, M Wiederholungen, K von einem neueren
-überholt". Viele Wiederholungen = der Compositor liefert wenig; „überholt" = er liefert mehr als 60/s.
+It counts the video frames on the wire and tells you from the gap distribution whether the source is
+producing fewer or whether something is dropping them.
 
-Liegen die Abstände auf dem 60-Hz-Raster (17 ms / 33 ms) und fehlt trotzdem ein Teil, verwirft etwas
-vor dem Encoder Bilder — typischerweise die Bildschirmaufnahme des Compositors bei einer
-**Vollbild**-Anwendung. Dann hilft, die Anwendung auf **randloses Fenster** umzustellen; das ist ein
-bekanntes Verhalten von GNOME/Mutter (mutter#3074, #3903, #4214), bei dem Fensteraufnahme funktioniert
-und Bildschirmaufnahme Bilder verliert.
-
-**2c. Vollbild-Spiele: das Bild bleibt stehen.** Reicht GNOME ein Vollbildfenster direkt an den Monitor
-durch (*direct scanout*), stellt es das Zusammensetzen ein — die Aufnahme friert auf dem letzten Bild ein,
-während Ton und Controller weiterlaufen ([mutter#3074](https://gitlab.gnome.org/GNOME/mutter/-/work_items/3074),
-[#3903](https://gitlab.gnome.org/GNOME/mutter/-/work_items/3903)). Im Protokoll steht dann „die
-Bildschirmaufnahme liefert seit 3s kein neues Bild". Zwei Auswege:
-
-- **Sofort:** das Spiel auf **randloses Fenster** stellen — dann gibt es kein Durchreichen.
-- **Dauerhaft:** die mitgelieferte GNOME-Erweiterung. Sie schaltet die Direktdurchreichung ab, solange der
-  Server läuft, und nimmt das danach zurück. **Der Server schaltet sie beim Start selbst ein** — nur einlesen
-  muss GNOME sie einmal, und das passiert ausschließlich beim Anmelden. Nach der Installation also einmal
-  ab- und anmelden, danach ist nichts mehr zu tun. Solange sie noch nicht eingelesen ist, sagt das Protokoll
-  das ausdrücklich („noch nicht eingelesen — einmal ab- und anmelden").
-
-**3. An der PS3 probieren: SELECT + Quadrat** schaltet die Darstellung um (vsync aus → vsync →
-vsync + 1 Bild Puffer). *vsync aus* zeigt jedes Bild sofort, ohne auf die nächste Bildwiederholung zu
-warten — geringste Latenz, dafür minimales Tearing. *vsync + 1 Bild Puffer* ist am gleichmäßigsten,
-kostet aber spürbar Eingabeverzögerung.
-
-
-## Log & Fehlersuche
-
-Log: `~/.local/state/tee-cell-stream-server/server.log` (Menü → *Log öffnen*).
-
-- **PS3 findet den Server nicht**: Sind PC und PS3 im selben Netz? Der Beacon geht an jede
-  Broadcast-Adresse der aktiven Netzwerkkarten (im Log: „Beacon an: …"). Firewall: `sudo ufw status` muss
-  `38310/udp ALLOW` zeigen.
-- **Schwarzes Bild / „Bildschirmfreigabe abgelehnt"**: Portal-Dialog erneut bestätigen — den gespeicherten
-  Token löschen (`screencast_restore_token` in `settings.json` auf `null`) und den Server neu starten.
-- **Kein Gamepad, nur Maus**: `ls -l /dev/uinput` muss dem Benutzer Schreibrecht zeigen (ACL); nach der
-  Installation einmal ab- und anmelden.
-- **Kein Ton**: `ffmpeg -f pulse -i @DEFAULT_MONITOR@ -t 1 -f null -` muss laufen; sonst ist kein
-  Standard-Ausgabegerät gesetzt.
-- **Desktop bleibt auf 720p**: Menü → *Beenden* stellt zurück; im Notfall `Einstellungen → Anzeige`.
-
-## Entwicklung
+## Development
 
 ```
-PYTHONPATH=src python3 -m teecellstream            # GUI
-PYTHONPATH=src python3 -m teecellstream --headless # nur Server
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-bash tests/run_integration.sh                      # Fake-PS3 gegen den Server (ohne Portal, ohne Umschaltung)
+PYTHONPATH=src python3 -m teecellstream            # the app
+PYTHONPATH=src python3 -m teecellstream --headless # server only, no window
+PYTHONPATH=src python3 -m unittest discover -s tests
+bash tests/run_integration.sh                      # a fake PS3 against the real server
 bash packaging/build-deb.sh                        # → dist/*.deb
-sudo tools/wire-fps.py <IP-der-PS3> -d 30          # Bildrate auf der Leitung messen
 ```
 
-Quellen des Originals zur Referenz: `upstream/` (Server-C#, PS3-App-Protokoll, READMEs mit den
-gemessenen Erkenntnissen des Autors).
+390 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
+the console expects: fragment layout, clock sync, frame pacing, audio packet rate and the controller
+channel. `SPEC.md` documents every module's contract and, where behaviour deviates from the Windows
+original, the measurement that justified it.
+
+## Credits and licence
+
+Apache-2.0, like the original. The PS3 application, the Windows server this was ported from and the
+application icon are the work of [mohasi](https://github.com/mohasi/ps3-dev); `upstream/` keeps unmodified
+reference copies of the sources this was checked against, and `NOTICE` records who did what.
