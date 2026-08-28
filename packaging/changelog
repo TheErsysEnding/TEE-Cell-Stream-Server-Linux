@@ -1,3 +1,10 @@
+tee-cell-stream-server (1.6.2) unstable; urgency=medium
+
+  * Maintainer-Adresse auf github@teebug.de. Die vorherige war eine private
+    Adresse und hatte in einem veroeffentlichten Paket nichts verloren.
+
+ -- TEE <github@teebug.de>  Fri, 28 Aug 2026 12:30:00 +0200
+
 tee-cell-stream-server (1.6.1) unstable; urgency=medium
 
   * Englische README als Startseite des Projekts, deutsche Anleitung als
