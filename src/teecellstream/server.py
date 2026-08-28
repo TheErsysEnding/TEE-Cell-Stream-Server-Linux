@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from . import capture, custom_commands, encoders, log, netinfo, protocol
+from . import capture, custom_commands, encoders, log, netinfo, protocol, shell_extension
 from .audio import AudioStreamer
 from .childproc import kill_all
 from .clock import now_us
@@ -55,6 +55,7 @@ class Server:
         self._last_client_packet = time.monotonic()
         self._running = False
         self._threads: list[threading.Thread] = []
+        self.extension_state = shell_extension.UNAVAILABLE   # set by the shell-extension thread at start-up
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -88,7 +89,8 @@ class Server:
 
         self._running = True
         for name, target in (("beacon", self._run_beacon_loop), ("watchdog", self._run_client_watchdog),
-                             ("receive", self._run_receive_loop), ("capture-warmup", self._warm_up_capture)):
+                             ("receive", self._run_receive_loop), ("capture-warmup", self._warm_up_capture),
+                             ("shell-extension", self._enable_shell_extension)):
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
             self._threads.append(thread)
@@ -147,6 +149,14 @@ class Server:
             capture.warm_up()
         except Exception as error:   # noqa: BLE001 - never let a portal hiccup kill the server
             log.write("capture: Vorbereitung fehlgeschlagen: %s" % error)
+
+    def _enable_shell_extension(self) -> None:
+        """Switch on the bundled GNOME extension (see shell_extension.py) - the package cannot, we can."""
+        try:
+            self.extension_state = shell_extension.ensure_enabled()
+        except Exception as error:   # noqa: BLE001 - never let this take the server down
+            log.write("extension: unerwarteter Fehler (%s)" % error)
+            self.extension_state = shell_extension.FAILED
 
     # ------------------------------------------------------------------ what the window shows
 

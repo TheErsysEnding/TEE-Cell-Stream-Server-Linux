@@ -1,3 +1,15 @@
+tee-cell-stream-server (1.6.0) unstable; urgency=medium
+
+  * Die mitgelieferte GNOME-Erweiterung schaltet sich jetzt von selbst ein: der
+    Server tut es beim Start ueber org.gnome.Shell.Extensions. Das Paket kann es
+    nicht, weil Erweiterungen pro Benutzer aktiviert werden und das
+    Installationsskript als root laeuft - die App laeuft als der Benutzer.
+    Damit entfaellt das manuelle "gnome-extensions enable". Einlesen muss GNOME
+    sie weiterhin einmal beim Anmelden; solange sagt das Protokoll ausdruecklich,
+    was zu tun ist und dass ein randloses Fenster bis dahin hilft.
+
+ -- TEE <github@teebug.de>  Fri, 28 Aug 2026 11:40:00 +0200
+
 tee-cell-stream-server (1.5.1) unstable; urgency=medium
 
   * Kritisch in der Bildtaktung von 1.5.0: im Ueberlauf-Zweig galt ein Zeitfenster

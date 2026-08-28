@@ -148,12 +148,11 @@ während Ton und Controller weiterlaufen ([mutter#3074](https://gitlab.gnome.org
 Bildschirmaufnahme liefert seit 3s kein neues Bild". Zwei Auswege:
 
 - **Sofort:** das Spiel auf **randloses Fenster** stellen — dann gibt es kein Durchreichen.
-- **Dauerhaft:** die mitgelieferte GNOME-Erweiterung aktivieren. Sie schaltet die Direktdurchreichung ab,
-  solange der Server läuft, und nimmt das danach zurück. Einmal ab- und anmelden (GNOME liest neue
-  Erweiterungen nur beim Anmelden ein), dann:
-  ```
-  gnome-extensions enable tee-cell-stream-scanout@tee.local
-  ```
+- **Dauerhaft:** die mitgelieferte GNOME-Erweiterung. Sie schaltet die Direktdurchreichung ab, solange der
+  Server läuft, und nimmt das danach zurück. **Der Server schaltet sie beim Start selbst ein** — nur einlesen
+  muss GNOME sie einmal, und das passiert ausschließlich beim Anmelden. Nach der Installation also einmal
+  ab- und anmelden, danach ist nichts mehr zu tun. Solange sie noch nicht eingelesen ist, sagt das Protokoll
+  das ausdrücklich („noch nicht eingelesen — einmal ab- und anmelden").
 
 **3. An der PS3 probieren: SELECT + Quadrat** schaltet die Darstellung um (vsync aus → vsync →
 vsync + 1 Bild Puffer). *vsync aus* zeigt jedes Bild sofort, ohne auf die nächste Bildwiederholung zu

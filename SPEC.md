@@ -48,6 +48,7 @@ src/teecellstream/
   ui.py                Hauptfenster (GTK4/libadwaita)
   tray.py              StatusNotifierItem (DBus) — best effort
   autostart.py         ~/.config/autostart/tee-cell-stream-server.desktop
+  shell_extension.py   schaltet die mitgelieferte GNOME-Erweiterung ein (org.gnome.Shell.Extensions)
 data/
   tee-cell-stream-server.desktop, icons/ (App-Icon + Tray-Icons idle/live), 70-tee-cell-stream-uinput.rules
 tests/
@@ -335,6 +336,15 @@ class DesktopInput:
   Keymap via `xkb_keymap_new_from_names`, dann alle Keycodes/Level nach dem
   Keysym des Zeichens durchsuchen (`xkb_keymap_key_get_syms_by_level`, Level 1 = Shift, 2 = AltGr/ISO_Level3_Shift), evdev-Code = xkb-Keycode − 8.
   Fallback ohne libxkbcommon: US-Tabelle. Unbekanntes Zeichen → Log einmalig, ignorieren.
+
+### shell_extension.py
+`ensure_enabled() -> str` mit den Zuständen `enabled | already | needs_logout | unavailable | failed`; wirft nie.
+Ruft `org.gnome.Shell.Extensions.GetExtensionInfo` und bei Bedarf `EnableExtension` für
+`tee-cell-stream-scanout@tee.local`. **Warum in der App und nicht im postinst:** Erweiterungen werden pro Benutzer
+aktiviert, das Installationsskript läuft als root — die App läuft als der Benutzer und darf es deshalb. GNOME liest
+neu installierte Erweiterungen ausschließlich beim Sitzungsstart ein; ist sie dem Shell noch unbekannt (leeres
+GetExtensionInfo), wird `needs_logout` gemeldet und der Grund samt Zwischenlösung ins Protokoll geschrieben.
+server.py ruft das beim Start in einem eigenen Thread und legt das Ergebnis in `Server.extension_state` ab.
 
 ### display_mode.py — Moduswahl (gemessen, weicht bewusst vom Original ab)
 `choose_capture_mode(modes, stream_w, stream_h, fps) -> (w, h, refresh)` und
