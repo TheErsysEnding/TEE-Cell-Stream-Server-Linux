@@ -61,6 +61,15 @@ ENTROPY_CODERS = ("cavlc", "cabac")
 
 # How the encoder spends the bitrate. Only the x264 rung honours all three; NVENC gets "cbr" as its own
 # -rc cbr and treats "quality" as VBR, because its ull preset has no quality-targeted mode.
+#
+# All three write HRD timing parameters into the bitstream (x264's nal-hrd), and that turned out to matter
+# more than the rate control itself. Measured on the real console at 1920x1088, changing nothing else:
+#     plain VBR, no HRD                 42-55 ms latency
+#     pinned rate, no HRD               44-52 ms      <- same, so uniform frame sizes are NOT the reason
+#     VBR + HRD                         29-33 ms
+#     CBR (pinned rate + HRD + filler)  <=32 ms
+# Without the timing parameters the PS3 evidently buffers a picture before showing it; with them it hands
+# it straight on. It costs a handful of bytes in the SPS and nothing else, so every mode carries it.
 #   vbr      - the target rate on average, with headroom for the refresh strip. What the console was proven with.
 #   quality  - a constant quality instead of a constant rate, capped so the network still cannot be flooded.
 #              A still desktop then costs almost nothing AND stays sharp, which is the case VBR handles worst.

@@ -319,18 +319,18 @@ class ArgumentTests(unittest.TestCase):
 
     def test_x264_intra_refresh(self):
         self.assertEqual(_build(X264, "intra"),
-                         HEAD + RAW_INPUT + X264_CODEC + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=1"]
+                         HEAD + RAW_INPUT + X264_CODEC + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=1:nal-hrd=vbr"]
                          + RATE + ["-g", "60"] + OUT)
 
     def test_x264_keyframes(self):
         self.assertEqual(_build(X264, "keyframe"),
-                         HEAD + RAW_INPUT + X264_CODEC + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=0"]
+                         HEAD + RAW_INPUT + X264_CODEC + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=0:nal-hrd=vbr"]
                          + RATE + ["-g", "60"] + OUT)
 
     def test_x264_x11grab(self):
         self.assertEqual(_build(X264, "intra", X11_INPUT, True),
                          HEAD + X11_INPUT + ["-vf", SCALE + ",format=yuv420p"] + X264_CODEC
-                         + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=1"] + RATE + ["-g", "60"] + OUT)
+                         + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=1:nal-hrd=vbr"] + RATE + ["-g", "60"] + OUT)
 
     def test_rate_scales_with_kbps(self):
         args = encoders.build_ffmpeg_args(FF, X264, RAW_INPUT, 1280, 720, 60, 4000, "intra", False)
@@ -603,7 +603,17 @@ class RateControl(unittest.TestCase):
         # without nal-hrd=cbr, x264 simply undershoots on easy frames instead of padding
         params = self._x264("cbr")[self._x264("cbr").index("-x264-params") + 1]
         self.assertIn("nal-hrd=cbr", params)
-        self.assertNotIn("nal-hrd", self._x264("vbr")[self._x264("vbr").index("-x264-params") + 1])
+
+    def test_every_mode_writes_hrd_timing_because_the_console_needs_it(self):
+        """The single biggest latency win after the encoder choice: 42-55 ms without these parameters on
+        the real console, 29-33 ms with them. Proven by elimination - a pinned rate WITHOUT them stayed at
+        44-52 ms, so it is the timing information and not the uniform frame sizes."""
+        for mode in protocol.RATE_CONTROLS:
+            args = self._x264(mode)
+            self.assertIn("nal-hrd=", args[args.index("-x264-params") + 1], mode)
+        for mode in ("vbr", "quality"):
+            args = self._x264(mode)
+            self.assertIn("nal-hrd=vbr", args[args.index("-x264-params") + 1], mode)
 
     def test_quality_targets_quality_and_keeps_the_ceiling(self):
         args = self._x264("quality")

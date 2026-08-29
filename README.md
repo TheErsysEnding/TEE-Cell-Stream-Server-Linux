@@ -38,7 +38,7 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.14.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.16.0_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
@@ -109,11 +109,25 @@ about 53 a second to a flat zero. The picture is blockier, which more bitrate pa
 by 2 ms and added 5 ms of latency. For this decoder it is pixels that cost, not bits. Set it high enough
 to look good and no higher.
 
-**How the bitrate is spent matters more than how much of it there is.** Three rate controls, x264 only:
-*variable* is the default and what the console was proven with; *constant quality* targets a quality
+**Eleven bytes in the SPS are worth 13–22 ms.** H.264 can carry HRD parameters — timing information that
+tells a decoder when it may hand a picture on. Without them the PS3 evidently buffers one first. Measured
+at 1920×1088, changing nothing else:
+
+| stream | latency |
+|---|---|
+| plain VBR, no HRD | 42–55 ms |
+| a pinned constant rate, still no HRD | 44–52 ms |
+| **VBR with HRD** | **29–33 ms** |
+| CBR (pinned rate, HRD, filler padding) | ≤32 ms |
+
+The middle row is what proves it: pinning the rate without the timing parameters changed nothing, so it
+is not uniform frame sizes the console likes — it is knowing when to let go of a picture. `x264`'s
+`nal-hrd` writes them, they cost eleven bytes once per stream, and every rate control here carries them.
+
+**Three rate controls**, x264 only: *variable* is the default; *constant quality* targets a quality
 instead of a rate, so a still desktop costs almost nothing and its text still stays sharp — the case
-plain VBR handles worst; *constant bitrate* holds the rate exactly and pads with filler NAL units when
-there is nothing to send, which buys legibility only until the padding starts.
+plain VBR handles worst; *constant bitrate* holds the rate exactly and pads with filler NAL units, which
+the sender then drops again.
 
 ## Two things Linux needs that Windows does not
 

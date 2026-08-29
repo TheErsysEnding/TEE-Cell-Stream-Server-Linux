@@ -146,6 +146,14 @@ def intra_refresh_enabled(encoder: VideoEncoder | None, loss_recovery: str) -> b
 # visible blur bar; a 1s sweep under VBR with headroom is ~10x below what the eye picks up, and 1s is
 # also how long a lost frame stays visible. The constants live in protocol.py.
 
+# HRD timing parameters, and they are the single biggest latency win after the encoder choice itself:
+# 42-55 ms without them on the real console, 29-33 ms with them, everything else equal (see protocol.py).
+# "cbr" needs nal-hrd=cbr because holding the rate is what it is for; everything else gets vbr, which
+# writes the same timing information without ever padding.
+_HRD_PARAM = {"cbr": ":nal-hrd=cbr"}
+_HRD_DEFAULT = ":nal-hrd=vbr"
+
+
 def _rate_args(kbps: int, rate_control: str = "vbr") -> list[str]:
     """VBR with headroom (maxrate) so the sweep strip can borrow bits, and a small VBV buffer that keeps
     any single frame - including the anchor IDR - well under the receiver's per-frame limit.
@@ -264,7 +272,7 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
         args += ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
                  "-threads", "1",   # AFTER the input: before it, ffmpeg would read it as a decoder setting
                  "-x264-params", "sliced-threads=0:slices=1:intra-refresh=%d%s"
-                 % (1 if intra else 0, ":nal-hrd=cbr" if rate_control == "cbr" else "")]
+                 % (1 if intra else 0, _HRD_PARAM.get(rate_control, _HRD_DEFAULT))]
         args += _coder_args(entropy_coder)
         args += _rate_args(kbps, rate_control)
         args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
