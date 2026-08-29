@@ -31,10 +31,11 @@ SIZE_LABELS = ("1280 × 720 – gemessen: 22 ms Decode auf der PS3 (empfohlen)",
                "1408 × 800 – etwas schärfer, rund 1,2× Decodelast",
                "1536 × 864 – deutlich schärfer, rund 1,4× Decodelast",
                "1792 × 1008 – am schärfsten, rund 2× Decodelast",
-               "1920 × 1088 – volles Full HD, rund 2,3× Decodelast – auf der PS3 gemessen: 38–44 ms",
-               "2048 × 1152 – Experiment, rund 2,6× Decodelast",
-               "2560 × 1440 – Experiment, rund 4× Decodelast – vermutlich zu viel",
-               "3840 × 2160 – Experiment, rund 9× Decodelast – mit Ansage aussichtslos")
+               "1920 × 1088 – volles Full HD, rund 2,3× Decodelast – gemessen: 38–44 ms mit x264")
+
+RATE_LABELS = ("Variabel (Standard) – Bitrate nur, wenn sich etwas bewegt",
+               "Konstante Qualität – Text bleibt auch im Leerlauf scharf",
+               "Konstante Bitrate – hält die Rate, füllt notfalls mit Leerdaten auf")
 
 LOSS_RECOVERY_KINDS = ("intra", "keyframe")
 LOSS_RECOVERY_LABELS = ("Intra-Refresh (Standard)", "Keyframes – falls NVENC Artefakte zeigt")
@@ -264,6 +265,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.coder_row.connect("notify::selected", self._on_coder_selected)
         group.add(self.coder_row)
 
+        self.rate_row = Adw.ComboRow(title="Ratensteuerung",
+                                     subtitle="Wofür der Encoder seine Bitrate ausgibt – nur der x264-Encoder kann alle drei",
+                                     model=Gtk.StringList.new(list(RATE_LABELS)))
+        self.rate_row.connect("notify::selected", self._on_rate_selected)
+        group.add(self.rate_row)
+
         self.display_row = Adw.SwitchRow(title="Desktop während des Streams an die Streamgröße anpassen",
                                          subtitle="Nach dem Stream wird die alte Auflösung wiederhergestellt")
         self.display_row.connect("notify::active", self._on_display_toggled)
@@ -447,6 +454,18 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_choices()
             return
         self._server.entropy_coder = protocol.ENTROPY_CODERS[index]
+
+    def _on_rate_selected(self, row, _pspec) -> None:
+        if self._syncing:
+            return
+        index = row.get_selected()
+        if index < 0 or index >= len(protocol.RATE_CONTROLS) or protocol.RATE_CONTROLS[index] == self._server.rate_control:
+            return
+        if self._server.is_ps3_connected:
+            log.write("video: erst den Stream beenden, dann die Ratensteuerung wechseln")
+            self._sync_choices()
+            return
+        self._server.rate_control = protocol.RATE_CONTROLS[index]
 
     # --- the "can you still see this?" safety net ------------------------------------------------
     # A monitor can accept a mode and show nothing at all. The user is then staring at a black desktop
@@ -701,6 +720,11 @@ class MainWindow(Adw.ApplicationWindow):
             index = protocol.ENTROPY_CODERS.index(coder) if coder in protocol.ENTROPY_CODERS else 0
             if self.coder_row.get_selected() != index:
                 self.coder_row.set_selected(index)
+
+            rate = getattr(server, "rate_control", "vbr")
+            index = protocol.RATE_CONTROLS.index(rate) if rate in protocol.RATE_CONTROLS else 0
+            if self.rate_row.get_selected() != index:
+                self.rate_row.set_selected(index)
 
             if self.display_row.get_active() != bool(server.switch_display_mode):
                 self.display_row.set_active(bool(server.switch_display_mode))

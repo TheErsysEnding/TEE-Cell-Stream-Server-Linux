@@ -59,7 +59,7 @@ class LiveStreamer:
     # burst overruns it and the picture freezes until the next one.
     def __init__(self, sock, ffmpeg_path, fps, kbps, width, height, send_rate_kbps, create_capture,
                  encoders_to_try, loss_recovery, on_all_encoders_failed, video_kbps=None, entropy_coder=None,
-                 stream_size=None):
+                 stream_size=None, rate_control=None):
         self._sock = sock
         self._ffmpeg_path = ffmpeg_path
         self._fps = fps
@@ -76,6 +76,7 @@ class LiveStreamer:
         self._video_kbps = video_kbps
         self._entropy_coder = entropy_coder
         self._stream_size = stream_size
+        self._rate_control = rate_control
 
         # SINFO's level field. The Windows original had to get it right because its PS3 build sized the
         # decoder from it; this PS3 app does not - it reads coded size, level and ref frames out of the
@@ -114,6 +115,11 @@ class LiveStreamer:
         """The H.264 level to announce for this picture size, never below the 4.2 the console was proven
         with. Takes the size explicitly so it can never disagree with the size in the same SINFO."""
         return max(self._sinfo_level, protocol.sinfo_level_for(width, height, self._fps))
+
+    def _current_rate_control(self) -> str:
+        """"vbr", "quality" or "cbr"; anything unknown (including None) falls back to the proven "vbr"."""
+        chosen = self._rate_control() if callable(self._rate_control) else self._rate_control
+        return chosen if chosen in protocol.RATE_CONTROLS else "vbr"
 
     def _current_size(self) -> tuple[int, int]:
         """The stream size for the next session; anything unknown falls back to the constructor's."""
@@ -286,7 +292,7 @@ class LiveStreamer:
         try:
             args = encoders.build_ffmpeg_args(self._ffmpeg_path, encoder, input_args, session.width, session.height,
                                               self._fps, self._current_kbps(), loss_recovery, capture.needs_scale,
-                                              self._current_entropy_coder())
+                                              self._current_entropy_coder(), self._current_rate_control())
             process = _spawn_ffmpeg(args, raw_pipe)
         except (OSError, ValueError) as error:
             log.write("live: ffmpeg startet nicht: %s" % error)

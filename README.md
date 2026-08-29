@@ -38,7 +38,7 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.13.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.14.0_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
@@ -71,18 +71,11 @@ Five sizes, selectable while the server is idle:
 | 1536 × 864 | 1.44× | 1.778 | |
 | 1792 × 1008 | 1.96× | 1.778 | |
 | 1920 × 1088 | 2.27× | 1.765 | Full HD — measured at 38–44 ms decode |
-| 2048 × 1152 | 2.56× | 1.778 | experiment |
-| 2560 × 1440 | 4.00× | 1.778 | experiment |
-| 3840 × 2160 | 9.00× | 1.778 | experiment |
 
-The last three are there to find out where the console actually stops, not because they are expected to
-work. Decode time tracks pixels almost linearly, so 2560 × 1440 should land near 80 ms — five times the
-16.7 ms a 60 fps frame gets. And 3840 × 2160 hits a wall on the PC first: on the single thread that low
-latency requires, x264 manages only 49 fps there — below the 60 the stream needs.
-
-Above Full HD the announced H.264 level grows with the picture. Level 4.2 stops at 8704 macroblocks and
-1920 × 1088 needs 8160, so everything larger is announced as 5.0, 5.1 or 5.2 — whether `cellVdec` accepts
-a level that high is one of the things these sizes exist to answer.
+**1920 × 1088 is the ceiling, and it is the decoder's.** 2048 × 1152, 2560 × 1440 and 3840 × 2160 were
+offered for one release and tried on the console: none of them connected at all — no picture, no error,
+the PS3 simply refused. That is exactly where H.264 level 4.2 stops, at 8704 macroblocks per picture.
+1920 × 1088 needs 8160 and fits; 2048 × 1152 needs 9216 and does not. `cellVdec` will not go past 4.2.
 
 **Every one is a multiple of 16, and that is deliberate.** H.264 codes in 16×16 macroblocks, so 1080 is
 rounded up to 1088 and 900 to 912 no matter what you ask for — and the PS3 app derives its picture size
@@ -115,6 +108,12 @@ about 53 a second to a flat zero. The picture is blockier, which more bitrate pa
 **Bitrate is almost free, and almost pointless.** At 1792×1008, going from 12 to 35 Mbit/s changed decode
 by 2 ms and added 5 ms of latency. For this decoder it is pixels that cost, not bits. Set it high enough
 to look good and no higher.
+
+**How the bitrate is spent matters more than how much of it there is.** Three rate controls, x264 only:
+*variable* is the default and what the console was proven with; *constant quality* targets a quality
+instead of a rate, so a still desktop costs almost nothing and its text still stays sharp — the case
+plain VBR handles worst; *constant bitrate* holds the rate exactly and pads with filler NAL units when
+there is nothing to send, which buys legibility only until the padding starts.
 
 ## Two things Linux needs that Windows does not
 

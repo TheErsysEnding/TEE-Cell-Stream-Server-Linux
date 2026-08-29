@@ -579,5 +579,50 @@ class BitstreamTests(unittest.TestCase):
                 self.assertEqual(pps["entropy_coding_mode_flag"], expected)
 
 
+class RateControl(unittest.TestCase):
+    """Three ways to spend the bitrate. VBR is what the console was proven with and stays the default;
+    the other two exist because a still desktop is exactly the case VBR handles worst."""
+
+    def _x264(self, rate_control):
+        return encoders.build_ffmpeg_args("ffmpeg", X264, ["-i", "in"], 1920, 1088, 60, 12000,
+                                          "intra", False, "cavlc", rate_control)
+
+    def test_vbr_is_the_default_and_unchanged(self):
+        self.assertEqual(self._x264("vbr"), self._x264("nonsense"))
+        args = self._x264("vbr")
+        self.assertIn("-b:v", args)
+        self.assertNotIn("-minrate", args)
+        self.assertNotIn("-crf", args)
+
+    def test_cbr_pins_all_three_rates_to_the_same_number(self):
+        args = self._x264("cbr")
+        for flag in ("-b:v", "-maxrate", "-minrate"):
+            self.assertEqual("12000k", args[args.index(flag) + 1], flag)
+
+    def test_cbr_asks_x264_to_actually_hold_the_rate(self):
+        # without nal-hrd=cbr, x264 simply undershoots on easy frames instead of padding
+        params = self._x264("cbr")[self._x264("cbr").index("-x264-params") + 1]
+        self.assertIn("nal-hrd=cbr", params)
+        self.assertNotIn("nal-hrd", self._x264("vbr")[self._x264("vbr").index("-x264-params") + 1])
+
+    def test_quality_targets_quality_and_keeps_the_ceiling(self):
+        args = self._x264("quality")
+        self.assertEqual(str(protocol.QUALITY_CRF), args[args.index("-crf") + 1])
+        self.assertNotIn("-b:v", args)          # a target rate would fight the quality target
+        self.assertEqual("16800k", args[args.index("-maxrate") + 1])
+
+    def test_every_mode_keeps_the_vbv_under_the_consoles_per_picture_limit(self):
+        for mode in protocol.RATE_CONTROLS:
+            args = self._x264(mode)
+            bufsize_kbit = int(args[args.index("-bufsize") + 1].rstrip("k"))
+            self.assertLessEqual(bufsize_kbit * 1000 // 8, protocol.PS3_MAX_AU_BYTES, mode)
+
+    def test_nvenc_follows_for_cbr_and_falls_back_for_quality(self):
+        for mode, expected in (("vbr", "vbr"), ("cbr", "cbr"), ("quality", "vbr")):
+            args = encoders.build_ffmpeg_args("ffmpeg", NVENC, ["-i", "in"], 1920, 1088, 60, 12000,
+                                              "intra", False, "cavlc", mode)
+            self.assertEqual(expected, args[args.index("-rc") + 1], mode)
+
+
 if __name__ == "__main__":
     unittest.main()

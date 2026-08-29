@@ -146,7 +146,7 @@ def intra_refresh_enabled(encoder: VideoEncoder | None, loss_recovery: str) -> b
 # visible blur bar; a 1s sweep under VBR with headroom is ~10x below what the eye picks up, and 1s is
 # also how long a lost frame stays visible. The constants live in protocol.py.
 
-def _rate_args(kbps: int) -> list[str]:
+def _rate_args(kbps: int, rate_control: str = "vbr") -> list[str]:
     """VBR with headroom (maxrate) so the sweep strip can borrow bits, and a small VBV buffer that keeps
     any single frame - including the anchor IDR - well under the receiver's per-frame limit.
 
@@ -155,10 +155,16 @@ def _rate_args(kbps: int) -> list[str]:
     (stream.c, openDecoderForStream), so 2 costs it one more frame buffer and nothing else."""
     # the VBV window doubles as the biggest a single picture may get, and the PS3 drops one over 1 MB
     bufsize = min(kbps * protocol.REFRESH_BUFFER_MS // 1000, protocol.MAX_VBV_KBIT)
+    tail = ["-bufsize", "%dk" % bufsize, "-bf", "0", "-refs", "1"]
+    if rate_control == "cbr":
+        # one rate, always. No headroom to give the sweep, so the ceiling IS the target.
+        return ["-b:v", "%dk" % kbps, "-maxrate", "%dk" % kbps, "-minrate", "%dk" % kbps] + tail
+    if rate_control == "quality":
+        # constant quality, capped by the same ceiling VBR uses so a busy scene still cannot flood the link
+        return ["-crf", str(protocol.QUALITY_CRF),
+                "-maxrate", "%dk" % (kbps * protocol.REFRESH_MAX_RATE_PERCENT // 100)] + tail
     return ["-b:v", "%dk" % kbps,
-            "-maxrate", "%dk" % (kbps * protocol.REFRESH_MAX_RATE_PERCENT // 100),
-            "-bufsize", "%dk" % bufsize,
-            "-bf", "0", "-refs", "1"]
+            "-maxrate", "%dk" % (kbps * protocol.REFRESH_MAX_RATE_PERCENT // 100)] + tail
 
 
 def _gop_args(interval_seconds: int, fps: int) -> list[str]:
@@ -186,7 +192,7 @@ def _coder_args(entropy_coder: str) -> list[str]:
 
 def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_args: list[str], width: int, height: int,
                       fps: int, kbps: int, loss_recovery: str, capture_needs_scale: bool,
-                      entropy_coder: str = "auto") -> list[str]:
+                      entropy_coder: str = "auto", rate_control: str = "vbr") -> list[str]:
     """The whole ffmpeg command line: capture input in, raw Annex-B H.264 out on stdout.
 
     A raw-pipe capture (Portal/PipeWire, test source) already delivers I420/bt709/limited at the output
@@ -202,10 +208,11 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
             args += ["-vf", _scale_filter(width, height, "yuv420p")]
         # p1/ull/vbr: the fastest preset, the low-latency tuning, and VBR for the sweep's headroom.
         # -pix_fmt yuv420p matches the known-good CPU path's colours.
-        args += ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-rc", "vbr", "-pix_fmt", "yuv420p"]
+        args += ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull",
+                 "-rc", "cbr" if rate_control == "cbr" else "vbr", "-pix_fmt", "yuv420p"]
         args += _coder_args(entropy_coder)
         args += NVENC_DELAY_ARGS
-        args += _rate_args(kbps)
+        args += _rate_args(kbps, "cbr" if rate_control == "cbr" else "vbr")
         if intra:
             # ffmpeg's nvenc wrapper turns -g into the SWEEP once intra refresh is on (nvenc.c: intraRefreshPeriod =
             # gopLength, intraRefreshCnt = gopLength - 1, and the IDR period becomes infinite) - so the Windows
@@ -236,7 +243,7 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
         # user's choice has to be passed here too, or a fallback from nvenc to VA-API would silently
         # undo it (verified: "ffmpeg -h encoder=h264_vaapi" -> "-coder ... (default cabac)").
         args += _coder_args(entropy_coder)
-        args += _rate_args(kbps)
+        args += _rate_args(kbps)   # VA-API stays on VBR: no Intel/AMD card here to prove anything else on
         args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
         args += _OUTPUT
         return args
@@ -256,9 +263,10 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
             args += ["-vf", _scale_filter(width, height, "yuv420p")]
         args += ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
                  "-threads", "1",   # AFTER the input: before it, ffmpeg would read it as a decoder setting
-                 "-x264-params", "sliced-threads=0:slices=1:intra-refresh=%d" % (1 if intra else 0)]
+                 "-x264-params", "sliced-threads=0:slices=1:intra-refresh=%d%s"
+                 % (1 if intra else 0, ":nal-hrd=cbr" if rate_control == "cbr" else "")]
         args += _coder_args(entropy_coder)
-        args += _rate_args(kbps)
+        args += _rate_args(kbps, rate_control)
         args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
         args += _OUTPUT
         return args

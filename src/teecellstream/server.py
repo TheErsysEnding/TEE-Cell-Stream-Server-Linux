@@ -74,7 +74,8 @@ class Server:
             self.sock, self.ffmpeg_path, protocol.FPS, protocol.KBPS, protocol.WIDTH, protocol.HEIGHT,
             protocol.SEND_RATE_KBPS, capture.create_capture, lambda: self.encoders_to_try,
             lambda: self.loss_recovery, self._on_all_encoders_failed,
-            lambda: self.video_kbps, lambda: self.entropy_coder, lambda: self.stream_size)
+            lambda: self.video_kbps, lambda: self.entropy_coder, lambda: self.stream_size,
+            lambda: self.rate_control)
         # the same resolved binary the video uses (and the one the "bereit:" line names): audio must not
         # fall back to a bare "ffmpeg" off PATH while video runs an absolute path
         self.audio_streamer = AudioStreamer(self.sock, self.ffmpeg_path)   # desktop sound goes with the desktop picture
@@ -277,6 +278,20 @@ class Server:
             return
         settings.set("entropy_coder", value)
         log.write("video: Entropie-Codierung ab dem nächsten Stream: " + value.upper())
+
+    @property
+    def rate_control(self) -> str:
+        """How the encoder spends the bitrate: "vbr" (proven), "quality" (constant quality, capped) or
+        "cbr" (constant rate). Only the x264 rung honours all three."""
+        value = settings.get("rate_control", "vbr")
+        return value if value in protocol.RATE_CONTROLS else "vbr"
+
+    @rate_control.setter
+    def rate_control(self, value: str) -> None:
+        if value not in protocol.RATE_CONTROLS or value == self.rate_control:
+            return
+        settings.set("rate_control", value)
+        log.write("video: Ratensteuerung ab dem nächsten Stream: " + value.upper())
 
     @property
     def swap_mouse_sticks(self) -> bool:

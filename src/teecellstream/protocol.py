@@ -34,12 +34,11 @@ BEACON_REFRESH_TARGETS_S = 30
 # size). A 1080 stream therefore appears as 1088 on the console anyway, with 8 rows of encoder padding on
 # screen and the picture squashed by that much. Sending 1088 real rows costs exactly the same to decode
 # and wastes none of them.
-# Above Full HD is an experiment, not a recommendation: 1920x1088 already costs 38-44 ms per picture on a
-# real console with x264, and decode time tracks pixels almost linearly, so 2560x1440 should land near
-# 80 ms - past the 16.7 ms a 60 fps frame gets, and past what the picture-per-picture budget allows.
-# They are offered anyway because the only way to know where a 2006 decoder actually stops is to ask it.
-STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088),
-                (2048, 1152), (2560, 1440), (3840, 2160))
+# 1920x1088 is the ceiling, and it is the decoder's rather than ours. Tried on the real console: 2048x1152,
+# 2560x1440 and 3840x2160 never connected at all - no picture, no error, the PS3 simply refused. That is
+# exactly where H.264 level 4.2 stops (8704 macroblocks per picture); 1920x1088 needs 8160 and fits, and
+# 2048x1152 needs 9216 and does not. cellVdec evidently will not go past 4.2, so the sizes above are gone.
+STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088))
 WIDTH, HEIGHT = STREAM_SIZES[0]
 FPS = 60
 KBPS = 10000
@@ -59,6 +58,17 @@ SEND_RATE_KBPS = KBPS * 3        # packets may leave faster than the video's own
 # kilobytes going out in one burst; lose a single fragment of it and there is never a second chance.
 BITRATE_CHOICES_KBPS = (4000, 6000, 8000, 10000, 12000, 16000, 20000, 24000, 30000, 35000, 40000)
 ENTROPY_CODERS = ("cavlc", "cabac")
+
+# How the encoder spends the bitrate. Only the x264 rung honours all three; NVENC gets "cbr" as its own
+# -rc cbr and treats "quality" as VBR, because its ull preset has no quality-targeted mode.
+#   vbr      - the target rate on average, with headroom for the refresh strip. What the console was proven with.
+#   quality  - a constant quality instead of a constant rate, capped so the network still cannot be flooded.
+#              A still desktop then costs almost nothing AND stays sharp, which is the case VBR handles worst.
+#   cbr      - a genuinely constant rate. x264 pads with filler NAL units to hold it, which is bandwidth spent
+#              on nothing; the splitter drops them (stream_sender: NAL type 12) so they cost the console only
+#              the bytes off the wire.
+RATE_CONTROLS = ("vbr", "quality", "cbr")
+QUALITY_CRF = 20                 # x264's -crf for the "quality" mode: visually clean without being wasteful
 
 SINFO_LEVEL = 42                 # the floor: H.264 level 4.2 covers everything up to and including 1920x1088
 

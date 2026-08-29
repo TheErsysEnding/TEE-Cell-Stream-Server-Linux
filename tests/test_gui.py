@@ -116,6 +116,7 @@ class MockServer:
         self.loss_recovery = "intra"
         self.video_kbps = 6000              # the two knobs that decide the PS3's decode cost
         self.entropy_coder = "cavlc"
+        self.rate_control = "vbr"
         self.stream_size = (1280, 720)
         self.swap_mouse_sticks = False
         self.switch_display_mode = True
