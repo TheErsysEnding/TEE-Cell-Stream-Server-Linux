@@ -291,16 +291,16 @@ class FragmentHeaderTest(unittest.TestCase):
     def test_pacing_spreads_a_big_frame_over_the_send_rate(self):
         data = random.Random(11).randbytes(100 * 1024)
         frag_count = (len(data) + 1299) // 1300                                  # 79
-        per_fragment_us = (20 + 1300) * 8 * 1000 // protocol.SEND_RATE_KBPS       # 352us at 30000 kbps
-        self.assertEqual(per_fragment_us, 352)
-        floor_s = (frag_count - 1) * per_fragment_us / 1_000_000                  # 27.456ms: last fragment's due time
+        per_fragment_us = (20 + 1300) * 8 * 1000 // protocol.SEND_RATE_KBPS       # 293us at 36000 kbps
+        # derived, not pinned: the send rate follows the default bitrate, and that moves with the measurements
+        self.assertEqual(per_fragment_us, (20 + 1300) * 8 * 1000 // (protocol.KBPS * 3))
+        floor_s = (frag_count - 1) * per_fragment_us / 1_000_000                  # 22.9ms: last fragment's due time
 
         started = time.perf_counter()
         send_access_unit(self.tx, self.target, 12, data, True, now_us(), protocol.SEND_RATE_KBPS)
         elapsed = time.perf_counter() - started
         packets = self._collect(frag_count)
         self.assertEqual(reassemble(packets), data)
-        self.assertGreaterEqual(elapsed, 0.025, "sent faster than the send rate allows: %.1fms" % (elapsed * 1000))
         self.assertGreaterEqual(elapsed, floor_s * 0.98, "sent faster than the send rate allows: %.1fms" % (elapsed * 1000))
         self.assertLess(elapsed, 0.060, "pacing overshoots badly: %.1fms for a %.1fms frame" % (elapsed * 1000, floor_s * 1000))
 

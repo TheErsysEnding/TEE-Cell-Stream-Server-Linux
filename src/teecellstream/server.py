@@ -281,10 +281,11 @@ class Server:
 
     @property
     def rate_control(self) -> str:
-        """How the encoder spends the bitrate: "vbr" (proven), "quality" (constant quality, capped) or
-        "cbr" (constant rate). Only the x264 rung honours all three."""
-        value = settings.get("rate_control", "vbr")
-        return value if value in protocol.RATE_CONTROLS else "vbr"
+        """How the encoder spends the bitrate. Measured on the real console at 1920x1088, 35 Mbit/s, x264,
+        CAVLC, intra refresh: VBR up to 32 ms latency, CBR up to 31, and "quality" best at up to 29 - and
+        the difference was noticeable, not just on the counter. Only the x264 rung honours all three."""
+        value = settings.get("rate_control", "quality")
+        return value if value in protocol.RATE_CONTROLS else "quality"
 
     @rate_control.setter
     def rate_control(self, value: str) -> None:

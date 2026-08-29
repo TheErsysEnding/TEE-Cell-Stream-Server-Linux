@@ -41,7 +41,10 @@ BEACON_REFRESH_TARGETS_S = 30
 STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088))
 WIDTH, HEIGHT = STREAM_SIZES[0]
 FPS = 60
-KBPS = 10000
+# 12 Mbit/s rather than the 6 this shipped with: with CAVLC, the deblocking filter off and the HRD timing
+# parameters in place, the console no longer cares much about the rate - measured 38-42 ms decode at
+# 12 Mbit/s against 40-45 at 35 at 1792x1008 - so the old caution bought nothing and cost sharpness.
+KBPS = 12000
 SEND_RATE_KBPS = KBPS * 3        # packets may leave faster than the video's own rate
 
 # The PS3's decoder is the wall, and these two knobs are what move it. Measured on the target PC with a

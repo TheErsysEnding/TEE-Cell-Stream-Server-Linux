@@ -24,7 +24,7 @@ WINDOW_WIDTH = 640
 WINDOW_HEIGHT = 600
 NARROW_BREAKPOINT = "max-width: 500sp"
 
-BITRATE_LABELS = tuple("%d Mbit/s%s" % (k // 1000, " (empfohlen)" if k == 6000 else "")
+BITRATE_LABELS = tuple("%d Mbit/s%s" % (k // 1000, " (empfohlen)" if k == 12000 else "")
                        for k in protocol.BITRATE_CHOICES_KBPS)
 ENTROPY_LABELS = ("CAVLC – die PS3 decodiert deutlich schneller", "CABAC – etwas schärfer, teurer für die PS3")
 SIZE_LABELS = ("1280 × 720 – gemessen: 22 ms Decode auf der PS3 (empfohlen)",
@@ -33,8 +33,8 @@ SIZE_LABELS = ("1280 × 720 – gemessen: 22 ms Decode auf der PS3 (empfohlen)",
                "1792 × 1008 – am schärfsten, rund 2× Decodelast",
                "1920 × 1088 – volles Full HD, rund 2,3× Decodelast – gemessen: 38–44 ms mit x264")
 
-RATE_LABELS = ("Variabel (Standard) – Bitrate nur, wenn sich etwas bewegt",
-               "Konstante Qualität – Text bleibt auch im Leerlauf scharf",
+RATE_LABELS = ("Variabel – Bitrate nur, wenn sich etwas bewegt",
+               "Konstante Qualität (Standard) – gemessen die niedrigste Latenz, Text bleibt scharf",
                "Konstante Bitrate – hält die Rate, füllt notfalls mit Leerdaten auf")
 
 LOSS_RECOVERY_KINDS = ("intra", "keyframe")

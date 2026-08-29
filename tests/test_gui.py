@@ -483,7 +483,8 @@ class MainWindowTest(unittest.TestCase):
                 self.assertTrue(window.size_row.get_sensitive())
                 self.assertEqual(protocol.BITRATE_CHOICES_KBPS.index(6000), window.bitrate_row.get_selected())
                 self.assertEqual(protocol.ENTROPY_CODERS.index("cavlc"), window.coder_row.get_selected())
-                self.assertIn("(empfohlen)", ui.BITRATE_LABELS[protocol.BITRATE_CHOICES_KBPS.index(6000)])
+                # the recommendation marks whatever the default bitrate currently is
+                self.assertIn("(empfohlen)", ui.BITRATE_LABELS[protocol.BITRATE_CHOICES_KBPS.index(protocol.KBPS)])
                 self.assertTrue(ui.ENTROPY_LABELS[0].startswith("CAVLC"), ui.ENTROPY_LABELS)
                 self.assertTrue(window.bitrate_row.get_sensitive())
                 self.assertTrue(window.coder_row.get_sensitive())
