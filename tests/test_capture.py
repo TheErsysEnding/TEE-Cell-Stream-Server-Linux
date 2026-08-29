@@ -1512,5 +1512,36 @@ def _swallow(read_fd: int) -> None:
 
 
 
+class SmoothnessReport(unittest.TestCase):
+    """60 pictures a second can still judder: the count says nothing about how evenly spaced their content
+    is. These are the four shapes the report has to tell apart."""
+
+    def _report(self, gaps, fps=60):
+        instance = capture.PortalCapture.__new__(capture.PortalCapture)
+        instance.fps = fps
+        instance._content_gaps_ms = list(gaps)
+        return instance.smoothness_report()
+
+    def test_an_even_stream_reads_as_fully_in_time(self):
+        self.assertIn("100% im Takt", self._report([16.7] * 100))
+        self.assertIn("0 sichtbare Hänger", self._report([16.7] * 100))
+
+    def test_a_beat_between_source_and_grid_reads_as_out_of_time(self):
+        # 60 pictures a second leave, but their content alternates 8 ms and 25 ms apart: the count is
+        # perfect and the motion is not. Nothing but this measurement can see it.
+        self.assertIn("0% im Takt", self._report([8.0, 25.0] * 50))
+
+    def test_a_genuinely_slower_source_shows_up_in_the_median(self):
+        report = self._report([25.0] * 100)
+        self.assertIn("Median 25.0 ms", report)
+        self.assertIn("0% im Takt", report)
+
+    def test_held_pictures_are_counted_separately(self):
+        self.assertIn("10 sichtbare Hänger", self._report([16.7] * 90 + [33.4] * 10))
+
+    def test_too_few_samples_say_so_instead_of_inventing_a_number(self):
+        self.assertIn("zu wenige", self._report([16.7] * 5))
+
+
 if __name__ == "__main__":
     unittest.main()

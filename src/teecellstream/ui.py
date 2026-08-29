@@ -26,19 +26,29 @@ NARROW_BREAKPOINT = "max-width: 500sp"
 
 BITRATE_LABELS = tuple("%d Mbit/s%s" % (k // 1000, " (empfohlen)" if k == 12000 else "")
                        for k in protocol.BITRATE_CHOICES_KBPS)
-ENTROPY_LABELS = ("CAVLC – die PS3 decodiert deutlich schneller", "CABAC – etwas schärfer, teurer für die PS3")
-SIZE_LABELS = ("1280 × 720 – gemessen: 22 ms Decode auf der PS3 (empfohlen)",
-               "1408 × 800 – etwas schärfer, rund 1,2× Decodelast",
-               "1536 × 864 – deutlich schärfer, rund 1,4× Decodelast",
-               "1792 × 1008 – am schärfsten, rund 2× Decodelast",
-               "1920 × 1088 – volles Full HD, rund 2,3× Decodelast – gemessen: 38–44 ms mit x264")
+# Short names for the dropdown, full explanations underneath it. GTK truncates a long selected value with
+# an ellipsis at any window size, so the sentence that explains a choice can never live inside the choice:
+# it goes into the row's subtitle, which the row rewrites whenever the selection changes.
+ENTROPY_LABELS = ("CAVLC", "CABAC")
+ENTROPY_HINTS = ("Die PS3 decodiert CAVLC rund 43 % schneller – gemessen 22 ms statt 36–40 ms bei 720p",
+                 "CABAC ist etwas schärfer pro Bit, kostet die PS3 aber deutlich mehr Decodezeit")
 
-RATE_LABELS = ("Variabel – Bitrate nur, wenn sich etwas bewegt",
-               "Konstante Qualität (Standard) – gemessen die niedrigste Latenz, Text bleibt scharf",
-               "Konstante Bitrate – hält die Rate, füllt notfalls mit Leerdaten auf")
+SIZE_LABELS = ("1280 × 720", "1408 × 800", "1536 × 864", "1792 × 1008", "1920 × 1088")
+SIZE_HINTS = ("Empfohlen für den Einstieg – gemessen 22 ms Decode auf der PS3",
+              "Etwas schärfer, rund 1,2× Decodelast",
+              "Deutlich schärfer, rund 1,4× Decodelast",
+              "Rund 2× Decodelast – ein guter Mittelweg",
+              "Volles HD, rund 2,3× Decodelast – gemessen 38–44 ms mit x264")
+
+RATE_LABELS = ("Variabel", "Konstante Qualität", "Konstante Bitrate")
+RATE_HINTS = ("Bitrate nur, wenn sich etwas bewegt – die ursprüngliche Einstellung",
+              "Standard: gemessen die niedrigste Latenz (29 ms), und Text bleibt auch im Leerlauf scharf",
+              "Hält die Rate genau und füllt notfalls mit Leerdaten auf, die der Server wieder wegwirft")
 
 LOSS_RECOVERY_KINDS = ("intra", "keyframe")
-LOSS_RECOVERY_LABELS = ("Intra-Refresh (Standard)", "Keyframes – falls NVENC Artefakte zeigt")
+LOSS_RECOVERY_LABELS = ("Intra-Refresh", "Keyframes")
+LOSS_RECOVERY_HINTS = ("Standard: repariert das Bild laufend, ohne Bitratenspitzen",
+                       "Ganze Schlüsselbilder im Sekundentakt – falls NVENC über die Zeit Artefakte zeigt")
 COMMAND_KINDS = ("none", "run")
 COMMAND_KIND_LABELS = ("Keine", "Befehl oder URI ausführen")
 
@@ -455,6 +465,16 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._server.entropy_coder = protocol.ENTROPY_CODERS[index]
 
+    def _sync_hints(self) -> None:
+        """Each combo row explains its CURRENT choice underneath itself. The dropdown holds short names
+        because GTK ellipsises a long selected value at any window size - the sentence goes here, where
+        it always fits."""
+        for row, hints in ((self.size_row, SIZE_HINTS), (self.coder_row, ENTROPY_HINTS),
+                           (self.rate_row, RATE_HINTS), (self.recovery_row, LOSS_RECOVERY_HINTS)):
+            index = row.get_selected()
+            if 0 <= index < len(hints) and row.get_subtitle() != hints[index]:
+                row.set_subtitle(hints[index])
+
     def _on_rate_selected(self, row, _pspec) -> None:
         if self._syncing:
             return
@@ -721,10 +741,12 @@ class MainWindow(Adw.ApplicationWindow):
             if self.coder_row.get_selected() != index:
                 self.coder_row.set_selected(index)
 
-            rate = getattr(server, "rate_control", "vbr")
+            rate = getattr(server, "rate_control", "quality")
             index = protocol.RATE_CONTROLS.index(rate) if rate in protocol.RATE_CONTROLS else 0
             if self.rate_row.get_selected() != index:
                 self.rate_row.set_selected(index)
+
+            self._sync_hints()
 
             if self.display_row.get_active() != bool(server.switch_display_mode):
                 self.display_row.set_active(bool(server.switch_display_mode))

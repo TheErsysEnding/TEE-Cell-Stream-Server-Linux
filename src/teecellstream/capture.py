@@ -185,6 +185,11 @@ class _PipeCapture(ScreenCapture):
         self._repeat_frames = 0     # ...the last one sent again because the slot found nothing new
         self._skipped_frames = 0    # source pictures a NEWER one took the place of (never a repeat)
         self._late_slots = 0        # slots lost because a write ran past its own grid point
+        # Smoothness, which the frame COUNT cannot show: 60 pictures a second leave even when the content
+        # in them is unevenly spaced in time, and that is what an eye reads as judder. These record the gap
+        # between the publish times of consecutive DISTINCT pictures as they actually went out.
+        self._content_gaps_ms: list[float] = []
+        self._last_published_sent = 0.0
         self._reader: threading.Thread | None = None
         self._drain: threading.Thread | None = None
         self._stderr_tail = ""
@@ -233,6 +238,8 @@ class _PipeCapture(ScreenCapture):
         self._latest = self._writing = -1
         self._source_frames = self._sent_frames = 0
         self._new_frames = self._repeat_frames = self._skipped_frames = self._late_slots = 0
+        self._content_gaps_ms = []
+        self._last_published_sent = 0.0
         self._stderr_tail = ""
         self._stop = threading.Event()
 
@@ -485,6 +492,12 @@ class _PipeCapture(ScreenCapture):
             if new:
                 self._new_frames += 1
                 self._skipped_frames += new - 1      # superseded by a NEWER picture, never by a repeat
+                # how far apart in time the CONTENT of two consecutive sent pictures is. A perfectly smooth
+                # 60 fps stream has every one of these at 16.7 ms; a run of 8 ms and 25 ms alternating sends
+                # 60 pictures a second and still looks like half that.
+                if self._last_published_sent:
+                    self._content_gaps_ms.append((published - self._last_published_sent) * 1000.0)
+                self._last_published_sent = published
             else:
                 self._repeat_frames += 1
 
@@ -538,6 +551,28 @@ class _PipeCapture(ScreenCapture):
                 due += interval * missed
                 self._late_slots += missed
 
+    def smoothness_report(self) -> str:
+        """What the frame count cannot say: how evenly spaced the pictures were that actually went out.
+
+        The console's receivedFps and our own "N an ffmpeg" both stay at 60 while the picture judders,
+        because a repeated picture counts as much as a new one and an evenly PACED send says nothing about
+        evenly spaced CONTENT. This measures the distance between the publish times of consecutive distinct
+        pictures: a smooth 60 fps stream keeps every one of them near 16.7 ms."""
+        gaps = list(self._content_gaps_ms)
+        if len(gaps) < 30:
+            return "capture: zu wenige Bilder für eine Gleichmäßigkeits-Aussage (%d)" % len(gaps)
+        gaps.sort()
+        median = gaps[len(gaps) // 2]
+        p90, p99 = gaps[int(len(gaps) * 0.90)], gaps[int(len(gaps) * 0.99)]
+        ideal = 1000.0 / max(1, self.fps)
+        # how many pictures land within a quarter of an interval of where a steady stream would put them
+        window = ideal / 4
+        on_time = sum(1 for gap in gaps if abs(gap - ideal) <= window)
+        doubled = sum(1 for gap in gaps if gap >= ideal * 1.75)   # a gap this long is a visibly held picture
+        return ("capture: Gleichmäßigkeit über %d Bilder - Abstand im Median %.1f ms (ideal %.1f), "
+                "90%% unter %.1f ms, 99%% unter %.1f ms; %.0f%% im Takt, %d sichtbare Hänger"
+                % (len(gaps), median, ideal, p90, p99, 100.0 * on_time / len(gaps), doubled))
+
     def stop(self) -> None:
         with self._lifecycle:
             self._stop_locked()
@@ -578,6 +613,7 @@ class _PipeCapture(ScreenCapture):
                   % (self.name, self._source_frames, self._sent_frames, self._new_frames, self._repeat_frames,
                      self._skipped_frames,
                      ", %d Takte ausgelassen" % self._late_slots if self._late_slots else ""))
+        log.write(self.smoothness_report())
 
     # -- threads
     def _run_reader(self, process: subprocess.Popen, stop: threading.Event) -> None:
