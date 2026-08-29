@@ -91,8 +91,9 @@ The PS3 decodes H.264 on its SPUs, and two encoder choices dominate everything e
 on the console, not guessed.
 
 **CAVLC, not CABAC.** CABAC's serial arithmetic decoding is the expensive part on an SPU: 36–40 ms per
-picture against 22 ms for CAVLC at the same bitrate, at 720p. Above the 16.7 ms a 60 fps frame gets, the
-console drops every other one.
+picture against 19–22 ms for CAVLC at the same bitrate, at 720p. A 60 fps frame gets 16.7 ms, and the
+decoder buys itself some slack by running on the SPUs in parallel with the receive thread — but at
+36–40 ms that slack is long gone and the console drops every other picture.
 
 **x264 rather than NVENC, if the resolution is high.** `x264 --preset ultrafast` turns the in-loop
 deblocking filter off, and that filter is most of what H.264 costs to decode. Measured on the console at
