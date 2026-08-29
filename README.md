@@ -162,7 +162,7 @@ bash tests/run_integration.sh                      # a fake PS3 against the real
 bash packaging/build-deb.sh                        # → dist/*.deb
 ```
 
-412 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
+407 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
 the console expects: fragment layout, clock sync, frame pacing, audio packet rate and the controller
 channel. `SPEC.md` documents every module's contract and, where behaviour deviates from the Windows
 original, the measurement that justified it.
