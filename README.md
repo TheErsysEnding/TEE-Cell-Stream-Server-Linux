@@ -77,8 +77,8 @@ Five sizes, selectable while the server is idle:
 
 The last three are there to find out where the console actually stops, not because they are expected to
 work. Decode time tracks pixels almost linearly, so 2560 × 1440 should land near 80 ms — five times the
-16.7 ms a 60 fps frame gets. And 3840 × 2160 runs into a wall on the PC first: x264 on the single thread
-low latency requires manages 49 fps there, below the 60 the stream needs.
+16.7 ms a 60 fps frame gets. And 3840 × 2160 hits a wall on the PC first: on the single thread that low
+latency requires, x264 manages only 49 fps there — below the 60 the stream needs.
 
 Above Full HD the announced H.264 level grows with the picture. Level 4.2 stops at 8704 macroblocks and
 1920 × 1088 needs 8160, so everything larger is announced as 5.0, 5.1 or 5.2 — whether `cellVdec` accepts
