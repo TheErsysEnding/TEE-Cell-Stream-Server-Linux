@@ -9,18 +9,22 @@ is unchanged: this server speaks its wire protocol byte for byte.
 
 ![The window](docs/fenster-server.png)
 
-**Measured against a real console** (PS3 over Ethernet, Ryzen 9 5900X + RTX 4070 Ti SUPER, Ubuntu 26.04,
-GNOME 50 on Wayland):
+**Full HD at 60 fps, on a console from 2006.** Measured against a real PS3 — x264 at 12 Mbit/s with CAVLC,
+Ryzen 9 5900X + RTX 4070 Ti SUPER, Ubuntu 26.04, GNOME 50 on Wayland:
 
-| | 1280×720 | 1920×1088 |
-|---|---|---|
-| Frame rate | 60 fps | 60 fps, longest gap 27 ms |
-| End-to-end latency | 25–30 ms | 40–47 ms |
-| Decode time on the PS3 | 19–20 ms | 38–44 ms |
-| Dropped pictures | 0 of 893 | 0 over a full match |
+| Stream size | Pixels vs 720p | Frame rate | End-to-end latency | Decode on the PS3 | Dropped |
+|---|---|---|---|---|---|
+| 1280 × 720 | 1.00× | 60 fps | 25–30 ms | 19–22 ms | 0 of 893 |
+| 1792 × 1008 | 1.96× | 60 fps | 40–47 ms | 38–42 ms | 0 |
+| **1920 × 1088** | **2.27×** | **60 fps**, longest gap 27 ms | **40–47 ms** | **38–44 ms** | **0** over a full match |
 
-Full HD at 60 fps on a 2006 console is not what the Windows original found (it measured 1080p at 80–120 ms
-and 27 fps). The difference is the encoder — see below.
+That is not what the Windows original found — it measured 1080p at 80–120 ms and 27 fps, and with an NVENC
+stream this port reproduces exactly that. The difference is not the console but the encoder; see
+[The encoder decides what the console can do](#the-encoder-decides-what-the-console-can-do).
+
+Two caveats on those numbers. **The PC and the PS3 were joined by a single Ethernet cable**, with no switch
+or router between them, so the network term is a best case and every extra hop adds to it. And decode time
+is a figure *under motion*: a still picture costs a fraction of it, because H.264 codes differences.
 
 ## What you need
 
@@ -56,6 +60,31 @@ While streaming, every button goes to the PC, so the PS3 app uses SELECT as its 
 | SELECT + R3 | show/hide the stats panel |
 | SELECT + Triangle/Circle/L1/R1 | custom commands 1–4 |
 
+## Resolutions
+
+Five sizes, selectable while the server is idle:
+
+| Stream size | Pixels vs 720p | Aspect (16:9 = 1.778) | |
+|---|---|---|---|
+| 1280 × 720 | 1.00× | 1.778 | the default |
+| 1408 × 800 | 1.22× | 1.760 | |
+| 1536 × 864 | 1.44× | 1.778 | |
+| 1792 × 1008 | 1.96× | 1.778 | |
+| 1920 × 1088 | 2.27× | 1.765 | Full HD |
+
+**Every one is a multiple of 16, and that is deliberate.** H.264 codes in 16×16 macroblocks, so 1080 is
+rounded up to 1088 and 900 to 912 no matter what you ask for — and the PS3 app derives its picture size
+from the macroblock count without reading the bitstream's cropping rectangle, so it draws those padding
+rows and stretches the picture to fit. Offering 1088 directly is honest about what is actually coded: no
+wasted rows, no distortion. 1792 × 1008 is the middle ground — 14 % fewer pixels than Full HD really
+costs, at nearly the same sharpness.
+
+**The desktop can follow the stream.** With the switch on, the server sets the desktop to 1280 × 720 or
+1920 × 1080 for the duration — standard modes every monitor knows, never 1088 — and puts the old one
+back when the stream ends. Because a mode a monitor cannot show leaves a black screen with no way to
+click anything, the switch is armed: a dialog asks you to confirm you can still see the picture, and if
+nothing is confirmed within 15 seconds the previous mode is restored by itself.
+
 ## The encoder decides what the console can do
 
 The PS3 decodes H.264 on its SPUs, and two encoder choices dominate everything else. Both were measured
@@ -74,14 +103,10 @@ about 53 a second to a flat zero. The picture is blockier, which more bitrate pa
 by 2 ms and added 5 ms of latency. For this decoder it is pixels that cost, not bits. Set it high enough
 to look good and no higher.
 
-## Three things Linux needs that Windows does not
+## Two things Linux needs that Windows does not
 
-All three were measured on the console, not guessed. They are the reason a straight port of the Windows
-server runs at about 25 fps here while this one runs at 60.
-
-**CAVLC instead of CABAC.** The PS3 decodes H.264 on its SPUs, where CABAC's serial arithmetic decoding is
-the expensive part. With CABAC the console needed 38–40 ms per picture — far past the 16.7 ms a 60 fps
-frame gets — so it dropped every other one. CAVLC at 6 Mbit/s brought that to 19–20 ms.
+Both were measured on the console, not guessed. Together with the encoder choices above they are the
+reason a straight port of the Windows server runs at about 25 fps here while this one runs at 60.
 
 **The desktop's refresh rate decides the frame rate.** GNOME's screen cast hands out only about two thirds
 of the refresh rate: 40.1 of 60 fps with the desktop at 1280×720@60, but 60.1 fps at 2560×1440@320 — even
@@ -110,8 +135,13 @@ trigger. **Its interface is in German**, as is `README.de.md`; the code and its 
 ## When the PS3 shows fewer than 60 fps
 
 `README.de.md` has the full troubleshooting chapter. The short version: read the console's stats panel
-(SELECT + R3) and look at `decode`. Above 16.7 ms the PS3 cannot sustain 60 fps and starts dropping. The
-two settings that move it are **entropy coding** (CAVLC is ~43 % cheaper to decode) and **bitrate**.
+(SELECT + R3) and look at `decode`. Above 16.7 ms the PS3 cannot sustain 60 fps and starts dropping —
+`behind` is the counter that then climbs. Three settings move it, in this order:
+
+1. **Entropy coding → CAVLC.** The largest single lever at any resolution.
+2. **Encoder → x264**, above 720p. It is the only one of the three that can switch the deblocking filter
+   off, and above 1536×864 that is the difference between playable and not.
+3. **A smaller stream size.** Decode cost tracks pixels almost linearly, which bitrate does not.
 
 To measure what actually leaves for the console rather than guessing:
 
@@ -132,7 +162,7 @@ bash tests/run_integration.sh                      # a fake PS3 against the real
 bash packaging/build-deb.sh                        # → dist/*.deb
 ```
 
-390 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
+412 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
 the console expects: fragment layout, clock sync, frame pacing, audio packet rate and the controller
 channel. `SPEC.md` documents every module's contract and, where behaviour deviates from the Windows
 original, the measurement that justified it.

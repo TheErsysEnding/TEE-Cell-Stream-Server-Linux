@@ -8,9 +8,19 @@ in Gegenrichtung, wie Steam Remote Play/Moonlight, nur mit der PS3 als Client. L
 **cell-stream** (`cell-stream.pkg`, Release 174-a5dd795) bleibt unverändert: dieser Server spricht ihr
 Protokoll byte-genau.
 
-**Was heute geht (Kabel oder WLAN, 720p60):** 60 fps, ~25 ms vom Encoder bis zum Bild, Ton, und der
-Controller steuert den PC — als Maus und Tastatur oder als echtes Xbox-360-Gamepad, das Spiele als
-eingestecktes Pad sehen.
+**Was heute geht:** 60 fps von 1280×720 bis **1920×1088 (Full HD)**, Ton, und der Controller steuert den
+PC — als Maus und Tastatur oder als echtes Xbox-360-Gamepad, das Spiele als eingestecktes Pad sehen.
+An einer echten PS3 gemessen, PC und Konsole direkt per Netzwerkkabel verbunden:
+
+| Streamgröße | Pixel ggü. 720p | Latenz gesamt | Decode auf der PS3 | verworfen |
+|---|---|---|---|---|
+| 1280 × 720 | 1,00× | 25–30 ms | 19–22 ms | 0 von 893 |
+| 1792 × 1008 | 1,96× | 40–47 ms | 38–42 ms | 0 |
+| **1920 × 1088** | **2,27×** | **40–47 ms** | **38–44 ms** | **0** über eine ganze Runde |
+
+Full HD bei 60 fps braucht **x264** statt NVENC: `--preset ultrafast` schaltet den Deblocking-Filter ab,
+und der ist der teuerste Teil der H.264-Decodierung. Mit NVENC kostet dasselbe Bild 147 ms statt 38–44 ms.
+Details im englischen [README.md](README.md).
 
 ![Das Fenster](docs/fenster-server.png)
 
@@ -57,14 +67,22 @@ am PC layoutkorrekt getippt (deutsches Layout wird berücksichtigt).
 
 - **Encoder**: NVIDIA (NVENC) → Intel/AMD (VA-API) → CPU (x264). Der erste funktionierende ist Standard;
   die Wahl wird gemerkt. Während eine PS3 streamt, ist die Auswahl gesperrt.
-- **Bitrate** (Standard 6 Mbit/s) und **Entropie-Codierung** (Standard CAVLC): die beiden Regler, die
-  die Decodelast der PS3 bestimmen — siehe „Wenn die PS3 weniger als 60 fps zeigt".
+- **Auflösung**: 1280×720, 1408×800, 1536×864, 1792×1008 oder 1920×1088. Alle sind Vielfache von 16,
+  weil H.264 in 16×16-Blöcken codiert und die PS3-App die *codierte* Größe zeichnet — 1920×1080 würde
+  dort als 1920×1088 leicht verzerrt ankommen. Ab 1536×864 gehört **x264** als Encoder dazu.
+- **Bitrate** (Standard 6 Mbit/s, bis 40 Mbit/s) und **Entropie-Codierung** (Standard CAVLC): siehe
+  „Wenn die PS3 weniger als 60 fps zeigt". Für die Decodelast zählen vor allem die Pixel, nicht die Bits:
+  bei 1792×1008 kosteten 35 statt 12 Mbit/s nur 2 ms Decode und 5 ms Latenz.
+- **Slices pro Bild** (Standard 1): 2 oder 4 machen es auf der Konsole messbar schlechter und zeigen
+  Nähte an den Grenzen — cellVdec verteilt ein Bild offenbar nicht scheibenweise auf die SPUs.
 - **Fehlerkorrektur**: *Intra-Refresh* (Standard, wie Original) oder *Keyframes*. Der Original-Autor
   beobachtete, dass NVENC-Intra-Refresh-Streams bei manchen Sessions die Decodezeit der PS3 hochkriechen
   lassen — dann auf *Keyframes* wechseln.
 - **Desktop während des Streams umschalten**: der Server wählt den kleinsten Monitormodus, der der
-  Bildschirmaufnahme genug Bildwiederholrate lässt (siehe „Wenn die PS3 weniger als 60 fps zeigt"), und
-  stellt danach zurück. Abschaltbar; dann wird vom nativen Modus heruntergerechnet — mehr Daten je Bild
+  Bildschirmaufnahme genug Bildwiederholrate lässt (siehe „Wenn die PS3 weniger als 60 fps zeigt") —
+  dabei nur Standardgrößen wie 1280×720 oder 1920×1080, nie 1088. Weil ein Modus, den der Monitor nicht
+  kann, einen schwarzen Bildschirm hinterlässt, fragt ein Dialog nach, ob das Bild noch da ist; ohne
+  Bestätigung stellt der Server nach 15 Sekunden von selbst zurück. Abschaltbar; dann wird vom nativen Modus heruntergerechnet — mehr Daten je Bild
   und damit etwas mehr Eingabeverzögerung.
 - **Sticks im Maus-Modus tauschen**, **Beim Anmelden starten** (minimiert in den Tray).
 
