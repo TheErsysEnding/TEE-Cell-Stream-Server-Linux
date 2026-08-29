@@ -31,7 +31,10 @@ SIZE_LABELS = ("1280 × 720 – gemessen: 22 ms Decode auf der PS3 (empfohlen)",
                "1408 × 800 – etwas schärfer, rund 1,2× Decodelast",
                "1536 × 864 – deutlich schärfer, rund 1,4× Decodelast",
                "1792 × 1008 – am schärfsten, rund 2× Decodelast",
-               "1920 × 1088 – volle Full-HD-Breite, rund 2,3× Decodelast – ungetestet")
+               "1920 × 1088 – volles Full HD, rund 2,3× Decodelast – auf der PS3 gemessen: 38–44 ms",
+               "2048 × 1152 – Experiment, rund 2,6× Decodelast",
+               "2560 × 1440 – Experiment, rund 4× Decodelast – vermutlich zu viel",
+               "3840 × 2160 – Experiment, rund 9× Decodelast – mit Ansage aussichtslos")
 
 LOSS_RECOVERY_KINDS = ("intra", "keyframe")
 LOSS_RECOVERY_LABELS = ("Intra-Refresh (Standard)", "Keyframes – falls NVENC Artefakte zeigt")

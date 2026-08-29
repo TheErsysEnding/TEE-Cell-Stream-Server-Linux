@@ -83,6 +83,8 @@ class LiveStreamer:
         # (upstream/ps3-app/stream.c: openDecoderForStream, and the comment above requestPlay). Measured
         # here: both rungs write level 3.2 into the SPS at every bitrate the window offers (4 to 12 Mbit/s),
         # so 4.2 over-announces - harmless, and kept because that is what the console was proven with.
+        # Above Full HD 4.2 would be an under-announcement rather than an over-one (its picture-size limit
+        # is 8704 macroblocks and 2560x1440 needs 14400), so the level follows the size from there on.
         self._sinfo_level = protocol.SINFO_LEVEL
 
         self._gate = threading.RLock()          # start() and stop() against each other
@@ -107,6 +109,11 @@ class LiveStreamer:
         """"cavlc", "cabac", or "auto" (the encoder's own default) - anything else counts as "auto"."""
         chosen = self._entropy_coder() if callable(self._entropy_coder) else self._entropy_coder
         return chosen if chosen in protocol.ENTROPY_CODERS else "auto"
+
+    def _level_for(self, width: int, height: int) -> int:
+        """The H.264 level to announce for this picture size, never below the 4.2 the console was proven
+        with. Takes the size explicitly so it can never disagree with the size in the same SINFO."""
+        return max(self._sinfo_level, protocol.sinfo_level_for(width, height, self._fps))
 
     def _current_size(self) -> tuple[int, int]:
         """The stream size for the next session; anything unknown falls back to the constructor's."""
@@ -160,7 +167,7 @@ class LiveStreamer:
         else:
             intra = self._announced_intra()
             width, height = self._current_size()
-        info = ("SINFO %d %d %d %d %d %d" % (width, height, self._sinfo_level, protocol.SINFO_REFS,
+        info = ("SINFO %d %d %d %d %d %d" % (width, height, self._level_for(width, height), protocol.SINFO_REFS,
                                             self._fps, 1 if intra else 0)).encode("ascii")
         try:
             for _ in range(3):

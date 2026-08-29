@@ -70,7 +70,19 @@ Five sizes, selectable while the server is idle:
 | 1408 × 800 | 1.22× | 1.760 | |
 | 1536 × 864 | 1.44× | 1.778 | |
 | 1792 × 1008 | 1.96× | 1.778 | |
-| 1920 × 1088 | 2.27× | 1.765 | Full HD |
+| 1920 × 1088 | 2.27× | 1.765 | Full HD — measured at 38–44 ms decode |
+| 2048 × 1152 | 2.56× | 1.778 | experiment |
+| 2560 × 1440 | 4.00× | 1.778 | experiment |
+| 3840 × 2160 | 9.00× | 1.778 | experiment |
+
+The last three are there to find out where the console actually stops, not because they are expected to
+work. Decode time tracks pixels almost linearly, so 2560 × 1440 should land near 80 ms — five times the
+16.7 ms a 60 fps frame gets. And 3840 × 2160 runs into a wall on the PC first: x264 on the single thread
+low latency requires manages 49 fps there, below the 60 the stream needs.
+
+Above Full HD the announced H.264 level grows with the picture. Level 4.2 stops at 8704 macroblocks and
+1920 × 1088 needs 8160, so everything larger is announced as 5.0, 5.1 or 5.2 — whether `cellVdec` accepts
+a level that high is one of the things these sizes exist to answer.
 
 **Every one is a multiple of 16, and that is deliberate.** H.264 codes in 16×16 macroblocks, so 1080 is
 rounded up to 1088 and 900 to 912 no matter what you ask for — and the PS3 app derives its picture size

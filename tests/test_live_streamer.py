@@ -884,5 +884,38 @@ class LiveStreamerTests(unittest.TestCase):
         self.assertRegex(log.get_recent(), r"live: \d+ Frames gesendet")
 
 
+class AnnouncedLevel(unittest.TestCase):
+    """SINFO's level field has to cover the picture size it sits next to. H.264 level 4.2 stops at 8704
+    macroblocks; 1920x1088 needs 8160 and fits, everything above it does not."""
+
+    def test_everything_up_to_full_hd_stays_at_the_proven_4_2(self):
+        for width, height in ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088)):
+            self.assertEqual(42, protocol.sinfo_level_for(width, height, 60), "%dx%d" % (width, height))
+
+    def test_above_full_hd_the_level_grows_with_the_picture(self):
+        self.assertEqual(50, protocol.sinfo_level_for(2048, 1152, 60))
+        self.assertEqual(51, protocol.sinfo_level_for(2560, 1440, 60))
+        self.assertEqual(52, protocol.sinfo_level_for(3840, 2160, 60))
+
+    def test_the_macroblock_rate_counts_too_not_only_the_picture(self):
+        # 2560x1440 is 14400 macroblocks - inside level 5.0's picture limit of 22080, but 60 of them a
+        # second is 864000, past 5.0's rate limit of 589824. At 24 fps the same picture fits 5.0.
+        self.assertEqual(51, protocol.sinfo_level_for(2560, 1440, 60))
+        self.assertEqual(50, protocol.sinfo_level_for(2560, 1440, 24))
+
+    def test_every_offered_size_gets_a_level_that_covers_it(self):
+        for width, height in protocol.STREAM_SIZES:
+            level = protocol.sinfo_level_for(width, height, protocol.FPS)
+            macroblocks = (width // 16) * (height // 16)
+            limit = dict((entry[0], entry[1]) for entry in protocol._H264_LEVELS)[level]
+            self.assertLessEqual(macroblocks, limit, "%dx%d ueber Level %d hinaus" % (width, height, level))
+
+    def test_sinfo_carries_the_level_that_belongs_to_its_own_size(self):
+        streamer = LiveStreamer.__new__(LiveStreamer)
+        streamer._sinfo_level, streamer._fps = protocol.SINFO_LEVEL, 60
+        self.assertEqual(42, streamer._level_for(1920, 1088))
+        self.assertEqual(51, streamer._level_for(2560, 1440))
+
+
 if __name__ == "__main__":
     unittest.main()

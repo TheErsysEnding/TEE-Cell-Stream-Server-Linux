@@ -34,7 +34,12 @@ BEACON_REFRESH_TARGETS_S = 30
 # size). A 1080 stream therefore appears as 1088 on the console anyway, with 8 rows of encoder padding on
 # screen and the picture squashed by that much. Sending 1088 real rows costs exactly the same to decode
 # and wastes none of them.
-STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088))
+# Above Full HD is an experiment, not a recommendation: 1920x1088 already costs 38-44 ms per picture on a
+# real console with x264, and decode time tracks pixels almost linearly, so 2560x1440 should land near
+# 80 ms - past the 16.7 ms a 60 fps frame gets, and past what the picture-per-picture budget allows.
+# They are offered anyway because the only way to know where a 2006 decoder actually stops is to ask it.
+STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088),
+                (2048, 1152), (2560, 1440), (3840, 2160))
 WIDTH, HEIGHT = STREAM_SIZES[0]
 FPS = 60
 KBPS = 10000
@@ -55,7 +60,23 @@ SEND_RATE_KBPS = KBPS * 3        # packets may leave faster than the video's own
 BITRATE_CHOICES_KBPS = (4000, 6000, 8000, 10000, 12000, 16000, 20000, 24000, 30000, 35000, 40000)
 ENTROPY_CODERS = ("cavlc", "cabac")
 
-SINFO_LEVEL = 42                 # H.264 level 4.2 covers everything we send; over-reserving on the PS3 is harmless
+SINFO_LEVEL = 42                 # the floor: H.264 level 4.2 covers everything up to and including 1920x1088
+
+# (level, max macroblocks per picture, max macroblocks per second) - Annex A of the H.264 spec. 4.2 stops at
+# 8704 macroblocks, and 1920x1088 needs 8160, so every size above Full HD needs a higher level announced.
+# The PS3 app builds its decoder from the stream's own SPS rather than from SINFO (see live_streamer), so
+# this is an honest announcement rather than a load-bearing one - but announcing 4.2 for a 4K stream would
+# simply be false.
+_H264_LEVELS = ((42, 8704, 522240), (50, 22080, 589824), (51, 36864, 983040), (52, 36864, 2073600))
+
+
+def sinfo_level_for(width: int, height: int, fps: int = 60) -> int:
+    """The lowest H.264 level whose picture-size and macroblock-rate limits cover this stream, floored at 4.2."""
+    macroblocks = ((width + 15) // 16) * ((height + 15) // 16)
+    for level, max_frame, max_rate in _H264_LEVELS:
+        if macroblocks <= max_frame and macroblocks * fps <= max_rate:
+            return level
+    return _H264_LEVELS[-1][0]
 SINFO_REFS = 1
 
 # video fragments (VF): 20-byte big-endian header, <= 1300 bytes payload
