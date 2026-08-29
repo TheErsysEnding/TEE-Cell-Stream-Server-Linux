@@ -3,3 +3,7 @@ __pycache__/
 build/
 dist/*.deb
 .venv*/
+
+# working documents, not part of the package
+FUER-MOHASI.md
+NOTIZEN-offen.md

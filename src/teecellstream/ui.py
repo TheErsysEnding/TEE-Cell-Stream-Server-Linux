@@ -27,6 +27,11 @@ NARROW_BREAKPOINT = "max-width: 500sp"
 BITRATE_LABELS = tuple("%d Mbit/s%s" % (k // 1000, " (empfohlen)" if k == 6000 else "")
                        for k in protocol.BITRATE_CHOICES_KBPS)
 ENTROPY_LABELS = ("CAVLC – die PS3 decodiert deutlich schneller", "CABAC – etwas schärfer, teurer für die PS3")
+SIZE_LABELS = ("1280 × 720 – gemessen: 22 ms Decode auf der PS3 (empfohlen)",
+               "1408 × 800 – etwas schärfer, rund 1,2× Decodelast",
+               "1536 × 864 – deutlich schärfer, rund 1,4× Decodelast",
+               "1792 × 1008 – am schärfsten, rund 2× Decodelast",
+               "1920 × 1088 – volle Full-HD-Breite, rund 2,3× Decodelast – ungetestet")
 
 LOSS_RECOVERY_KINDS = ("intra", "keyframe")
 LOSS_RECOVERY_LABELS = ("Intra-Refresh (Standard)", "Keyframes – falls NVENC Artefakte zeigt")
@@ -131,6 +136,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
         self.connect("destroy", self._on_destroy)
         self._timer_id = GLib.timeout_add(REFRESH_TICK_MS, self._on_tick)
+        # a mode switch asks the user whether they can still see anything; without a window to ask in
+        # (headless), display_mode simply does not arm the countdown and behaves as it always did
+        display = getattr(self._server, "display_mode", None)
+        if display is not None and hasattr(display, "set_confirm_prompt"):
+            display.set_confirm_prompt(self._prompt_display_confirm)
         self.refresh()
 
     # ------------------------------------------------------------------ layout
@@ -233,6 +243,12 @@ class MainWindow(Adw.ApplicationWindow):
         # The PS3's decoder, not the network, is the wall: measured 38-40 ms per frame at 11-13 Mbit/s CABAC
         # against the 16.7 ms a 60 fps frame gets, so the console dropped every other one. These two rows are
         # what buy that time back.
+        self.size_row = Adw.ComboRow(title="Auflösung",
+                                    subtitle="Größer heißt lesbarer Text, kostet die PS3 aber ungefähr proportional mehr Decodezeit",
+                                    model=Gtk.StringList.new(list(SIZE_LABELS)))
+        self.size_row.connect("notify::selected", self._on_size_selected)
+        group.add(self.size_row)
+
         self.bitrate_row = Adw.ComboRow(title="Bitrate",
                                         subtitle="Niedriger, wenn das Bild auf der PS3 ruckelt – höher nur, solange es flüssig bleibt",
                                         model=Gtk.StringList.new(list(BITRATE_LABELS)))
@@ -245,7 +261,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.coder_row.connect("notify::selected", self._on_coder_selected)
         group.add(self.coder_row)
 
-        self.display_row = Adw.SwitchRow(title="Desktop während des Streams auf 1280×720 schalten",
+        self.display_row = Adw.SwitchRow(title="Desktop während des Streams an die Streamgröße anpassen",
                                          subtitle="Nach dem Stream wird die alte Auflösung wiederhergestellt")
         self.display_row.connect("notify::active", self._on_display_toggled)
         group.add(self.display_row)
@@ -405,6 +421,18 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._server.video_kbps = protocol.BITRATE_CHOICES_KBPS[index]
 
+    def _on_size_selected(self, row, _pspec) -> None:
+        if self._syncing:
+            return
+        index = row.get_selected()
+        if index < 0 or index >= len(protocol.STREAM_SIZES) or protocol.STREAM_SIZES[index] == self._server.stream_size:
+            return
+        if self._server.is_ps3_connected:
+            log.write("video: erst den Stream beenden, dann die Auflösung wechseln")
+            self._sync_choices()
+            return
+        self._server.stream_size = protocol.STREAM_SIZES[index]
+
     def _on_coder_selected(self, row, _pspec) -> None:
         if self._syncing:
             return
@@ -416,6 +444,58 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_choices()
             return
         self._server.entropy_coder = protocol.ENTROPY_CODERS[index]
+
+    # --- the "can you still see this?" safety net ------------------------------------------------
+    # A monitor can accept a mode and show nothing at all. The user is then staring at a black desktop
+    # with no way to click anything, which is why the countdown - not the button - is what actually saves
+    # them: display_mode reverts on its own unless someone confirms. This dialog just makes the good case
+    # quick, and gives an immediate way out for the case where the picture is there but wrong.
+    def _prompt_display_confirm(self, seconds: int) -> None:
+        """Called from display_mode's worker thread: hand it straight to the GTK loop and return."""
+        GLib.idle_add(self._show_display_confirm, seconds)
+
+    def _show_display_confirm(self, seconds: int):
+        display = self._server.display_mode
+        dialog = Adw.AlertDialog(heading="Siehst du dieses Fenster?",
+                                 body=self._confirm_body(seconds))
+        dialog.add_response("no", "Nein, zurückschalten")
+        dialog.add_response("yes", "Ja, so lassen")
+        dialog.set_response_appearance("yes", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_response_appearance("no", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("yes")
+        dialog.set_close_response("no")
+
+        left = {"seconds": seconds, "done": False}
+
+        def tick():
+            if left["done"]:
+                return GLib.SOURCE_REMOVE
+            left["seconds"] -= 1
+            if left["seconds"] <= 0:
+                left["done"] = True
+                dialog.close()      # display_mode is switching back on its own; just get out of the way
+                return GLib.SOURCE_REMOVE
+            dialog.set_body(self._confirm_body(left["seconds"]))
+            return GLib.SOURCE_CONTINUE
+
+        def answered(_dialog, response):
+            left["done"] = True
+            if response == "yes":
+                display.confirm_visible()
+                log.write("display: Bild bestätigt, die neue Auflösung bleibt")
+            else:
+                display.reject_visible()
+
+        dialog.connect("response", answered)
+        GLib.timeout_add_seconds(1, tick)
+        dialog.present(self)
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _confirm_body(seconds: int) -> str:
+        return ("Der Desktop wurde für den Stream umgeschaltet.\n\n"
+                "Wenn du das hier lesen kannst, ist alles in Ordnung. Ohne Antwort wird in %d Sekunden "
+                "automatisch auf die vorherige Auflösung zurückgeschaltet." % seconds)
 
     def _on_display_toggled(self, row, _pspec) -> None:
         if not self._syncing:
@@ -550,6 +630,7 @@ class MainWindow(Adw.ApplicationWindow):
         locked = connected   # don't let the encoder change out from under a live stream
         self.encoder_row.set_sensitive(not locked and len(self._encoder_kinds) > 0)
         self.recovery_row.set_sensitive(not locked)
+        self.size_row.set_sensitive(not locked)
         self.bitrate_row.set_sensitive(not locked)
         self.coder_row.set_sensitive(not locked)
 
@@ -602,6 +683,11 @@ class MainWindow(Adw.ApplicationWindow):
             index = LOSS_RECOVERY_KINDS.index(recovery) if recovery in LOSS_RECOVERY_KINDS else 0
             if self.recovery_row.get_selected() != index:
                 self.recovery_row.set_selected(index)
+
+            size = tuple(server.stream_size)
+            index = protocol.STREAM_SIZES.index(size) if size in protocol.STREAM_SIZES else 0
+            if self.size_row.get_selected() != index:
+                self.size_row.set_selected(index)
 
             kbps = server.video_kbps
             index = protocol.BITRATE_CHOICES_KBPS.index(kbps) if kbps in protocol.BITRATE_CHOICES_KBPS else 0

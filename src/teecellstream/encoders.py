@@ -153,9 +153,11 @@ def _rate_args(kbps: int) -> list[str]:
     -refs 1 is a request, not a promise: measured on this rig, x264 honours it but NVENC's driver writes
     max_num_ref_frames = 2 into the SPS anyway (4 without -bf 0). The PS3 reserves what the SPS says
     (stream.c, openDecoderForStream), so 2 costs it one more frame buffer and nothing else."""
+    # the VBV window doubles as the biggest a single picture may get, and the PS3 drops one over 1 MB
+    bufsize = min(kbps * protocol.REFRESH_BUFFER_MS // 1000, protocol.MAX_VBV_KBIT)
     return ["-b:v", "%dk" % kbps,
             "-maxrate", "%dk" % (kbps * protocol.REFRESH_MAX_RATE_PERCENT // 100),
-            "-bufsize", "%dk" % (kbps * protocol.REFRESH_BUFFER_MS // 1000),
+            "-bufsize", "%dk" % bufsize,
             "-bf", "0", "-refs", "1"]
 
 
@@ -242,10 +244,18 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
     if encoder.kind == "x264":
         # x264 spells intra refresh as an x264 param and uses -g as the sweep length. sliced-threads off
         # and one slice: a sweep only works if each frame strictly follows the last.
+        #
+        # -threads 1 is what makes this rung usable at all. With sliced threads off, x264 falls back to
+        # FRAME threading, and on a many-core machine that buffers about one frame per thread before it
+        # hands the first one out: measured on this 24-core PC, 26 frames held back = 433 ms of latency,
+        # in a program whose whole point is 25 ms. sliced-threads=1 also fixes the delay but splits each
+        # picture into one slice per thread, and multiple slices measured clearly WORSE on the console.
+        # One thread costs nothing here: 294 fps at 1792x1008, 400 at 1536x864 - five times real time.
         args += capture_input_args
         if capture_needs_scale:
             args += ["-vf", _scale_filter(width, height, "yuv420p")]
         args += ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+                 "-threads", "1",   # AFTER the input: before it, ffmpeg would read it as a decoder setting
                  "-x264-params", "sliced-threads=0:slices=1:intra-refresh=%d" % (1 if intra else 0)]
         args += _coder_args(entropy_coder)
         args += _rate_args(kbps)

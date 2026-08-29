@@ -35,7 +35,8 @@ OUT = ["-f", "h264", "-flush_packets", "1", "pipe:1"]
 SCALE = "scale=1280:720:flags=lanczos:out_color_matrix=bt709:out_range=tv"
 NVENC_CODEC = ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-rc", "vbr", "-pix_fmt", "yuv420p", "-delay", "0"]
 NVENC_TAIL = ["-color_range", "tv", "-colorspace", "bt709", "-forced-idr", "1"]
-X264_CODEC = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p"]
+X264_CODEC = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+              "-threads", "1"]   # frame threading would buffer ~one frame per core: 433 ms measured
 
 
 def _nal_types(stream):
@@ -287,12 +288,14 @@ class ArgumentTests(unittest.TestCase):
                                      "%s/%s/%s weicht mehr als um -coder ab" % (encoder.kind, loss, coder))
 
     def test_bitrate_flows_into_the_rate_arguments(self):
-        """Every choice the window offers must produce a consistent target/ceiling/buffer trio."""
+        """Every choice the window offers must produce a consistent target/ceiling/buffer trio - with the
+        buffer capped, because it also bounds the size of one picture and the PS3 drops one over 1 MB."""
         for kbps in protocol.BITRATE_CHOICES_KBPS:
             args = encoders.build_ffmpeg_args(FF, NVENC, RAW_INPUT, 1280, 720, 60, kbps, "intra", False, "cavlc")
             self.assertEqual(args[args.index("-b:v") + 1], "%dk" % kbps)
             self.assertEqual(args[args.index("-maxrate") + 1], "%dk" % (kbps * 140 // 100))
-            self.assertEqual(args[args.index("-bufsize") + 1], "%dk" % (kbps * 250 // 1000))
+            self.assertEqual(args[args.index("-bufsize") + 1],
+                             "%dk" % min(kbps * 250 // 1000, protocol.MAX_VBV_KBIT))
 
     def test_nvenc_keyframes(self):
         self.assertEqual(_build(NVENC, "keyframe"),
@@ -334,6 +337,33 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(args[args.index("-b:v") + 1], "4000k")
         self.assertEqual(args[args.index("-maxrate") + 1], "5600k")
         self.assertEqual(args[args.index("-bufsize") + 1], "1000k")
+
+    def test_no_bitrate_can_make_a_picture_the_ps3_would_drop(self):
+        """The console reassembles an access unit into a fixed 1 MB slot and drops a larger one silently
+        (FRAME_MAX_BYTES, stream.c). The VBV window is what bounds a single picture, so it must stay under."""
+        for kbps in protocol.BITRATE_CHOICES_KBPS:
+            args = encoders.build_ffmpeg_args(FF, NVENC, RAW_INPUT, 1280, 720, 60, kbps, "intra", False, "cavlc")
+            bufsize_kbit = int(args[args.index("-bufsize") + 1].rstrip("k"))
+            self.assertLessEqual(bufsize_kbit * 1000 // 8, protocol.PS3_MAX_AU_BYTES, "%d kbps" % kbps)
+
+    def test_the_cap_leaves_every_measured_bitrate_alone(self):
+        """Everything measured on the console was at 12000 or below; those command lines must not move."""
+        for kbps in (4000, 6000, 8000, 10000, 12000, 16000, 20000, 24000):
+            args = encoders.build_ffmpeg_args(FF, NVENC, RAW_INPUT, 1280, 720, 60, kbps, "intra", False, "cavlc")
+            self.assertEqual("%dk" % (kbps * protocol.REFRESH_BUFFER_MS // 1000),
+                             args[args.index("-bufsize") + 1], "%d kbps" % kbps)
+
+    def test_x264_encodes_on_one_thread(self):
+        """Without it x264 falls back to frame threading and buffers about one frame per core before it
+        hands the first one out - measured 26 frames = 433 ms on this 24-core PC. sliced-threads=1 also
+        fixes the delay but cuts the picture into one slice per thread, and multiple slices measured
+        worse on the console. The option must sit AFTER the input or ffmpeg reads it as a decoder setting."""
+        for loss_recovery in ("intra", "keyframe"):
+            args = encoders.build_ffmpeg_args(FF, X264, RAW_INPUT, 1280, 720, 60, 10000, loss_recovery, False)
+            self.assertEqual("1", args[args.index("-threads") + 1])
+            self.assertGreater(args.index("-threads"), args.index("-i"), "sonst gilt es fürs Dekodieren")
+            self.assertIn("sliced-threads=0", args[args.index("-x264-params") + 1])
+            self.assertIn("slices=1", args[args.index("-x264-params") + 1])
 
     def test_unknown_kind_is_refused(self):
         with self.assertRaises(ValueError):

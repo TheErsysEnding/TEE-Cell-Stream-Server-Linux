@@ -1,3 +1,156 @@
+tee-cell-stream-server (1.12.1) unstable; urgency=medium
+
+  * Das Log sagt jetzt die Wahrheit, wenn der Desktop bereits auf der
+    gewaehlten Groesse steht: bisher stand dort "schalte den Desktop dafuer
+    auf ...", obwohl gar nichts umgeschaltet wurde - und folglich auch nichts
+    zu bestaetigen war. Dieselbe Zeile wird ausserdem nicht mehr bei jedem
+    wiederholten PLAY erneut geschrieben.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 09:15:00 +0200
+
+tee-cell-stream-server (1.12.0) unstable; urgency=medium
+
+  * Der Desktop wird beim Umschalten nur noch in gewoehnliche Groessen
+    gebracht - 1280x720, 1920x1080 oder 2560x1440 - statt exakt in die
+    Streamgroesse. Exotische Modi wie 1408x800 oder 1792x1008 gibt es auf
+    fremden Bildschirmen womoeglich nicht, oder sie werden angenommen und
+    zeigen nichts. Eine Standardgroesse wird nur genommen, wenn sie auch
+    schnell genug ist: ein 60-Hz-Desktop gibt der Bildschirmaufnahme nur
+    zwei Drittel der Bilder heraus, und das waere schlimmer als Skalieren.
+  * Sicherheitsabfrage nach jedem Wechsel: "Siehst du dieses Fenster?" mit
+    Ja/Nein und 15 Sekunden Countdown. Ohne Antwort wird die vorherige
+    Aufloesung von selbst wiederhergestellt - denn wer einen schwarzen
+    Bildschirm hat, kann auf nichts mehr klicken. Ohne Fenster (headless)
+    wird nichts scharf geschaltet und alles verhaelt sich wie bisher.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 08:45:00 +0200
+
+tee-cell-stream-server (1.11.0) unstable; urgency=medium
+
+  * Neue Groesse 1920x1088 - die volle Full-HD-Breite. Nicht 1920x1080:
+    1080 ist nicht durch 16 teilbar, H.264 muss 1088 Zeilen codieren und die
+    ueberzaehligen als beschnitten markieren, und die PS3-App liest die
+    Zuschneide-Angaben nie (h264.c leitet die Groesse allein aus der
+    Makroblock-Zahl ab, absichtlich, weil cellVdec die CODIERTE Groesse
+    braucht). Ein 1080-Strom erscheint auf der Konsole also ohnehin als 1088,
+    nur mit 8 Zeilen Encoder-Fuellung im Bild. 1088 echte Zeilen kosten genau
+    dasselbe und verschenken keine davon.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 08:00:00 +0200
+
+tee-cell-stream-server (1.10.1) unstable; urgency=medium
+
+  * Wenn ffmpeg sich mitten im Stream beendet, steht sein Fehlertext jetzt
+    im Log. Bisher wurde er nur ausgegeben, wenn gar kein Bild herauskam -
+    starb der Encoder nach ein paar Bildern, blieb nur das "broken pipe" des
+    Zulieferers uebrig und die Ursache war verloren.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 07:30:00 +0200
+
+tee-cell-stream-server (1.10.0) unstable; urgency=medium
+
+  * x264 encodiert jetzt mit "-threads 1". Ohne das faellt x264 auf
+    Frame-Threading zurueck und puffert etwa ein Bild pro Kern, bevor es das
+    erste herausgibt: auf diesem 24-Kern-PC gemessene 26 Bilder = 433 ms
+    Verzoegerung, in einem Programm, dessen Sinn 25 ms sind. Ein Kern
+    genuegt bei weitem (294 fps bei 1792x1008, 400 bei 1536x864).
+  * Damit ist der x264-Encoder erstmals ernsthaft benutzbar - und
+    interessant: sein Strom kostet die PS3 laut Ersatzmessung rund 42 %
+    weniger Decodezeit als der von NVENC, weil "ultrafast" den
+    Glaettungsfilter abschaltet (2,37 -> 1,37 ms je Bild).
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 07:00:00 +0200
+
+tee-cell-stream-server (1.9.2) unstable; urgency=medium
+
+  * 45 und 50 Mbit/s wieder entfernt: auf der echten Konsole kam damit gar
+    keine Verbindung mehr zustande. Ein Intra-Refresh-Strom traegt genau EIN
+    Keyframe, den Anker-IDR ganz am Anfang, und die PS3 fuettert ihren
+    Decoder vorher mit nichts (stream.c: die erste Zugriffseinheit muss das
+    Keyframe sein, es traegt das SPS). Bei diesen Raten geht der Anker als
+    mehrere hundert Kilobyte grosser Schwall raus - ein verlorenes Fragment
+    darin, und es gibt keine zweite Gelegenheit.
+  * Hoechste Stufe ist jetzt 40 Mbit/s.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 06:15:00 +0200
+
+tee-cell-stream-server (1.9.1) unstable; urgency=medium
+
+  * Bitrate zusaetzlich mit 35, 40, 45 und 50 Mbit/s zum Ausprobieren. Der
+    VBV-Deckel aus 1.9.0 haelt das groesste Einzelbild dabei bei 819 KB, also
+    unter dem 1-MB-Fach der PS3.
+  * Hinweis: gemessen an einer synthetischen Quelle liefert NVENC bei
+    30/40/50 Mbit/s nur noch 26,0 / 27,4 / 28,9 Mbit/s - der Encoder findet
+    schlicht nichts mehr, wofuer er die Bits ausgeben koennte. Oberhalb von
+    etwa 30 Mbit/s ist also womoeglich nichts mehr zu gewinnen.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 05:45:00 +0200
+
+tee-cell-stream-server (1.9.0) unstable; urgency=medium
+
+  * Die Bitrate geht jetzt bis 30 Mbit/s: 16, 20, 24 und 30 sind dazu-
+    gekommen. CAVLC hat sich auf der echten Konsole als fast bitraten-
+    unempfindlich erwiesen (6 -> 12 Mbit/s kostete 19-20 -> 22 ms Decode),
+    also ist oberhalb von 12 noch etwas zu holen.
+  * Der VBV-Puffer wird gedeckelt. Er bestimmt, wie gross ein einzelnes Bild
+    werden darf, und die PS3 verwirft eine Zugriffseinheit ueber 1 MB
+    kommentarlos (FRAME_MAX_BYTES in stream.c). Unter 26 Mbit/s aendert die
+    Deckelung nichts, alle bisherigen Messungen gelten also unveraendert.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 05:15:00 +0200
+
+tee-cell-stream-server (1.8.1) unstable; urgency=medium
+
+  * Die Einstellung "Slices pro Bild" ist wieder entfernt. Auf der echten
+    PS3 wurde es mit 2 wie mit 4 deutlich schlechter, mit sichtbaren
+    Nahtstellen an den Slice-Grenzen. Damit ist die Vermutung widerlegt,
+    cellVdec verteile ein Bild slice-weise auf die SPUs - haette es sie
+    ignoriert, waere die Decodezeit gleich geblieben.
+  * Die Kommandozeilen sind wieder Argument fuer Argument die aus 1.7.1.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 04:45:00 +0200
+
+tee-cell-stream-server (1.8.0) unstable; urgency=medium
+
+  * Neue Einstellung "Slices pro Bild": 1 (Vorgabe, unveraendert), 2 oder 4.
+    Versuch: die PS3 decodiert auf ihren SPUs und cellVdec bekommt vier davon
+    (VDEC_SPU_COUNT in mohasis decode-h264.c). Bei einem Slice pro Bild gibt
+    es moeglicherweise nichts, was sich darauf verteilen laesst. Ob cellVdec
+    ueberhaupt pro Slice parallelisiert, ist offen.
+  * Kostet fast keine Bitrate (+0,4 % unter Intra-Refresh, +0,1 % mit
+    Keyframes bei 1536x864), und der Intra-Refresh-Sweep bleibt erhalten.
+  * Die Vorgabe erzeugt Argument fuer Argument dieselbe ffmpeg-Kommandozeile
+    wie bisher; ein Test haelt das fest.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 04:15:00 +0200
+
+tee-cell-stream-server (1.7.1) unstable; urgency=medium
+
+  * Die Auswahl bietet nur noch Groessen, die in beiden Richtungen durch 16
+    teilbar sind: 1280x720, 1408x800, 1536x864, 1792x1008. H.264 codiert in
+    16x16-Makrobloecken, deshalb wurden 1600x900 und 1920x1080 in Wahrheit
+    als 1600x912 und 1920x1088 codiert - die PS3 zeigte genau das an. Das
+    kostete Decodezeit fuer unsichtbare Zeilen und stauchte das Bild
+    (1600x912 ist 1,754 statt 1,778). Eine gespeicherte alte Einstellung
+    wird auf die passende neue Groesse abgebildet.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 03:30:00 +0200
+
+tee-cell-stream-server (1.7.0) unstable; urgency=medium
+
+  * Neue Einstellung "Aufloesung": 1280x720 (wie bisher, Vorgabe), 1600x900
+    oder 1920x1080. Groesser heisst lesbarer Text, kostet die SPUs der PS3
+    aber ungefaehr proportional mehr Decodezeit. Die beiden grossen Groessen
+    sind ungetestet - das Original mass 1080p mit 80-120 ms und 27 fps,
+    allerdings unter CABAC.
+  * AnnexBSplitter verwirft Filler-NALs (Typ 12) statt sie an das naechste
+    Bild zu haengen. Gemessen an einem stehenden Desktop unter NVENC-CBR:
+    98,5 % des Stroms waren Polsterung, und ein Bild wuchs dadurch von 2-3
+    auf 20-25 UDP-Fragmente - jedes davon eine weitere Verlustchance, die
+    ein Intra-Refresh-Strom als verschobenen Block stehen laesst.
+
+ -- TEE <github@teebug.de>  Sat, 29 Aug 2026 02:15:00 +0200
+
 tee-cell-stream-server (1.6.2) unstable; urgency=medium
 
   * Maintainer-Adresse auf github@teebug.de. Die vorherige war eine private

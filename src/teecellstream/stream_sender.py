@@ -24,6 +24,12 @@ assert _HEADER.size == FRAGMENT_HEADER_BYTES
 
 _START_CODE = b"\x00\x00\x01"
 _PICTURE_NAL_TYPES = (1, 5)   # coded slice of a non-IDR / IDR picture
+# Filler data: padding an encoder emits to hold a constant rate. It carries no picture and belongs to no
+# access unit. Measured on a still desktop under NVENC's CBR: 98.5% of the stream was filler, and because
+# this splitter attached it to the FRONT of the next unit, one frame grew from 2-3 UDP fragments to 20-25 -
+# every one of them another chance to lose a packet, which an intra-refresh stream then decodes straight
+# through as a displaced block. Dropped here rather than fragmented and sent.
+_FILLER_NAL_TYPE = 12
 
 # the PS3 refuses any frame past its FRAME_MAX_BYTES (1MiB): stream.c checks (fragCount-1)*1300 + payloadBytes
 # against it on EVERY fragment with that fragment's own payload, so a frame whose full-size fragments overshoot
@@ -117,12 +123,18 @@ class AnnexBSplitter:
                 # a complete access unit ends where the next one's first unit begins
                 with memoryview(pending) as window:
                     self._completed = (bytes(window[self._unit_start:nal_start]), self._unit_keyframe)
-                # drop the consumed bytes and restart the new unit at the front of the buffer
+                # drop the consumed bytes; the new unit (if any) restarts at the front of the buffer
                 del pending[:nal_start]
                 position -= nal_start
-                self._unit_start = 0
+                nal_start = 0
+                self._unit_start = -1
                 self._unit_has_picture = False
                 self._unit_keyframe = False
+            if nal_type == _FILLER_NAL_TYPE:
+                # opens no unit, so its bytes fall in front of the next one's start and are dropped with
+                # the next trim. it must not extend the unit it follows either - that is what sent it.
+                self._scan = position + 3
+                continue
             if self._unit_start < 0:
                 self._unit_start = nal_start
                 self._unit_has_picture = False

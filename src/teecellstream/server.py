@@ -74,7 +74,7 @@ class Server:
             self.sock, self.ffmpeg_path, protocol.FPS, protocol.KBPS, protocol.WIDTH, protocol.HEIGHT,
             protocol.SEND_RATE_KBPS, capture.create_capture, lambda: self.encoders_to_try,
             lambda: self.loss_recovery, self._on_all_encoders_failed,
-            lambda: self.video_kbps, lambda: self.entropy_coder)
+            lambda: self.video_kbps, lambda: self.entropy_coder, lambda: self.stream_size)
         # the same resolved binary the video uses (and the one the "bereit:" line names): audio must not
         # fall back to a bare "ffmpeg" off PATH while video runs an absolute path
         self.audio_streamer = AudioStreamer(self.sock, self.ffmpeg_path)   # desktop sound goes with the desktop picture
@@ -167,8 +167,8 @@ class Server:
     @property
     def settings_summary(self) -> str:
         recovery = "Intra-Refresh" if self.loss_recovery == "intra" else "Keyframes"
-        return "%dx%d mit %d fps, %d Mbit/s, %s, %s" % (protocol.WIDTH, protocol.HEIGHT, protocol.FPS,
-                                                        self.video_kbps // 1000, self.entropy_coder.upper(), recovery)
+        return "%dx%d mit %d fps, %d Mbit/s, %s, %s" % (self.stream_size + (protocol.FPS,
+                                                        self.video_kbps // 1000, self.entropy_coder.upper(), recovery))
 
     # the fuse. armed, the server answers the PS3; tripped, it ignores it and leaves the desktop alone.
     # it trips itself when the encoder will not start, because retrying that forever flapped the desktop
@@ -244,6 +244,26 @@ class Server:
             return
         settings.set("video_kbps", int(value))
         log.write("video: Bitrate ab dem nächsten Stream: %d Mbit/s" % (value // 1000))
+
+    @property
+    def stream_size(self) -> tuple[int, int]:
+        """What the PS3 is sent. Bigger is sharper and costs the console's SPU decoder in proportion."""
+        value = settings.get("stream_size", "")
+        # the misaligned sizes 1.7.0 offered map to their aligned neighbours rather than silently
+        # dropping back to 720p on someone who had picked a large one
+        value = {"1600x900": "1536x864", "1920x1080": "1920x1088"}.get(value, value)
+        for size in protocol.STREAM_SIZES:
+            if value == "%dx%d" % size:
+                return size
+        return protocol.STREAM_SIZES[0]
+
+    @stream_size.setter
+    def stream_size(self, value) -> None:
+        size = tuple(value) if isinstance(value, (tuple, list)) else ()
+        if size not in protocol.STREAM_SIZES or size == self.stream_size:
+            return
+        settings.set("stream_size", "%dx%d" % size)
+        log.write("video: Auflösung ab dem nächsten Stream: %dx%d" % size)
 
     @property
     def entropy_coder(self) -> str:
@@ -326,7 +346,7 @@ class Server:
                 # the desktop must be at the streaming size BEFORE the capture starts
                 keep_display_awake(True)
                 if self.switch_display_mode and not os.environ.get("TEE_CST_NO_DISPLAY_SWITCH"):
-                    self.display_mode.match_for_capture(protocol.WIDTH, protocol.HEIGHT, protocol.FPS)
+                    self.display_mode.match_for_capture(*self.stream_size, protocol.FPS)
                 self.live_streamer.start(sender)     # repeat PLAYs are ignored inside
                 self.audio_streamer.start(sender)
         elif text.startswith("PADMODE "):

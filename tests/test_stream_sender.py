@@ -381,6 +381,28 @@ class AnnexBSplitterSyntheticTest(unittest.TestCase):
         self.assertEqual(scan_nal_types(units[2][0]), [1])
         self.assertEqual(scan_nal_types(units[3][0]), [6, 1])
 
+    def test_filler_is_dropped_and_never_joins_a_unit(self):
+        """Filler data (NAL 12) pads a constant-rate stream and carries no picture. Sending it would turn a
+        2-3 fragment frame into 20-25, and in an intra-refresh stream every lost fragment is decoded
+        through as a displaced block. Measured on a still desktop under NVENC CBR: 98.5% of the bytes."""
+        def nal(nal_type, payload=b"\x00" * 8):
+            return b"\x00\x00\x00\x01" + bytes([nal_type]) + payload
+        stream = (nal(7) + nal(8) + nal(5) + nal(12, b"\xff" * 400)
+                  + nal(6) + nal(1) + nal(12, b"\xff" * 400)
+                  + nal(6) + nal(1) + nal(12, b"\xff" * 400) + nal(6) + nal(1))
+        for chunks in ([stream], [stream[:17], stream[17:]], [stream[i:i + 1] for i in range(len(stream))]):
+            units = split_with(AnnexBSplitter(), chunks)
+            self.assertEqual([scan_nal_types(data) for data, _keyframe in units],
+                             [[7, 8, 5], [6, 1], [6, 1], [6, 1]])
+            self.assertEqual([keyframe for _data, keyframe in units], [True, False, False, False])
+            for data, _keyframe in units:
+                self.assertNotIn(b"\xff" * 400, data, "die Polsterung darf nirgends mitgehen")
+
+    def test_a_filler_only_stream_yields_nothing(self):
+        """It carries no picture at all, so there is no unit to make from it - and no crash either."""
+        filler = b"\x00\x00\x00\x01" + bytes([12]) + b"\xff" * 100
+        self.assertEqual(split_with(AnnexBSplitter(), [filler * 5]), [])
+
     def test_every_split_point_gives_the_same_units(self):
         for cut in range(len(SYNTHETIC_STREAM) + 1):
             units = split_with(AnnexBSplitter(), [SYNTHETIC_STREAM[:cut], SYNTHETIC_STREAM[cut:]])

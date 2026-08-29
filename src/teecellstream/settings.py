@@ -12,6 +12,7 @@ DEFAULTS = {
     "encoder": None,                       # encoder kind ("nvenc" | "vaapi" | "x264"); None = best available
     "loss_recovery": "intra",              # "intra" (intra refresh, default) | "keyframe"
     "video_kbps": 6000,                    # video bitrate; the PS3's decoder, not the link, is the limit
+    "stream_size": "1280x720",             # what the PS3 gets; the larger sizes cost the SPU decoder roughly in proportion
     "entropy_coder": "cavlc",              # "cavlc" (cheap for the PS3 to decode) | "cabac" (the Windows original)
     "switch_display_mode": True,           # switch the desktop to the streaming resolution while streaming
     "swap_mouse_sticks": False,            # mouse mode: right stick moves the pointer

@@ -322,10 +322,41 @@ class LiveStreamerTests(unittest.TestCase):
         receiver.settimeout(0.2)
         return receiver
 
-    def _make(self, encoder_list, create_capture=GstTestCapture, loss_recovery="intra"):
+    def _make(self, encoder_list, create_capture=GstTestCapture, loss_recovery="intra", stream_size=None):
         self.streamer = LiveStreamer(self.sender, FFMPEG, FPS, protocol.KBPS, W, H, protocol.SEND_RATE_KBPS,
-                                     create_capture, lambda: list(encoder_list), lambda: loss_recovery, self.failures.append)
+                                     create_capture, lambda: list(encoder_list), lambda: loss_recovery, self.failures.append,
+                                     stream_size=stream_size)
         return self.streamer
+
+    def test_sinfo_announces_the_chosen_size_and_the_session_pins_it(self):
+        """SINFO leaves before the encoder starts, so a size changed in the window in between would leave the
+        two disagreeing. The session pins it; the next one picks the change up."""
+        chosen = [(1536, 864)]
+        streamer = self._make([], create_capture=GstTestCapture, stream_size=lambda: chosen[0])
+        target = self.receiver.getsockname()
+        streamer.send_stream_info(target)
+        self.assertEqual(b"SINFO 1536 864", self.receiver.recv(256)[:14], "vor dem Start gilt die Einstellung")
+
+        streamer.start(target)
+        try:
+            while True:                       # drain the three SINFO repeats start() sends
+                packet = self.receiver.recv(2048)
+                if packet.startswith(b"SINFO"):
+                    self.assertEqual(b"SINFO 1536 864", packet[:14])
+                    break
+            chosen[0] = (1280, 720)           # changed mid-session: the running one must not follow
+            streamer.send_stream_info(target)
+            while True:
+                packet = self.receiver.recv(2048)
+                if packet.startswith(b"SINFO"):
+                    self.assertEqual(b"SINFO 1536 864", packet[:14], "die laufende Sitzung behält ihre Größe")
+                    break
+        finally:
+            streamer.stop()
+
+    def test_an_unknown_size_falls_back_to_the_constructor(self):
+        streamer = self._make([], stream_size=lambda: (999, 111))
+        self.assertEqual((W, H), streamer._current_size())
 
     def _collect(self, seconds, reassembler, texts, stop_at_first_vf=False, receiver=None):
         """Receives for `seconds` (or until the first VF when asked); returns when the first VF arrived."""

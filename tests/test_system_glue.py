@@ -371,10 +371,15 @@ XRANDR_SAMPLE = (
 class _FakeBackend:
     name = "fake"
 
-    def __init__(self, width=2560, height=1440, switch_error=None, restore_error=None):
+    def __init__(self, width=2560, height=1440, switch_error=None, restore_error=None, modes=None):
         self.width, self.height = width, height
         self.switch_error, self.restore_error = switch_error, restore_error
+        self.modes = modes or []
         self.calls = []
+
+    def capture_modes(self):
+        self.calls.append("capture_modes")
+        return list(self.modes)
 
     def read(self):
         self.calls.append("read")
@@ -655,6 +660,94 @@ class DisplayModeSwitchLogicTests(unittest.TestCase):
         self.assertEqual(backend.calls, ["read", ("switch", 1280, 720, 60), "restore"])
         self.assertIn("display: Desktop wieder auf 2560x1440", log.get_recent())
 
+    def test_a_desktop_already_on_the_target_says_so_and_asks_nothing(self):
+        """The old wording promised a switch even when there was nothing to switch, which read like a bug.
+        And with nothing switched there is nothing to confirm either."""
+        backend = _FakeBackend(2560, 1440, modes=[display_mode.Mode(id="1440", width=2560, height=1440,
+                                                                    refresh=320.0)])
+        mode = display_mode.DisplayMode(backend=backend)
+        asked = []
+        mode.set_confirm_prompt(lambda seconds: asked.append(seconds))
+        switches_before = log.get_recent().count("umgeschaltet")   # das Log gehoert allen Tests gemeinsam
+        self.assertTrue(mode.match_for_capture(1920, 1088, 60))
+        self.assertFalse(mode.is_changed)
+        self.assertEqual([], asked, "ohne Wechsel darf nicht gefragt werden")
+        recent = log.get_recent()
+        self.assertIn("steht schon auf 2560x1440", recent)
+        self.assertEqual(switches_before, recent.count("umgeschaltet"), "es wurde nichts umgeschaltet")
+        self.assertNotIn(("switch", 2560, 1440, 320.0), backend.calls)
+
+    def test_the_same_target_is_not_announced_twice(self):
+        """A repeated PLAY runs through here again; the log should not fill up with the same line."""
+        backend = _FakeBackend(2560, 1440, modes=[display_mode.Mode(id="1440", width=2560, height=1440,
+                                                                    refresh=320.0)])
+        mode = display_mode.DisplayMode(backend=backend)
+        mode.match_for_capture(1920, 1088, 60)
+        before = log.get_recent().count("steht schon auf")
+        mode.match_for_capture(1920, 1088, 60)
+        self.assertEqual(before, log.get_recent().count("steht schon auf"))
+
+    def test_an_unconfirmed_switch_reverts_by_itself(self):
+        """The case this exists for: the monitor accepts the mode and shows nothing, so the user cannot
+        answer at all. The countdown, not the button, is what brings the picture back."""
+        backend = _FakeBackend(2560, 1440)
+        mode = display_mode.DisplayMode(backend=backend)
+        asked = []
+        mode.set_confirm_prompt(lambda seconds: asked.append(seconds))
+        with mock.patch.object(display_mode, "CONFIRM_SECONDS", 0.2):
+            self.assertTrue(mode.match_to(1920, 1080, 120))
+            mode.arm_confirmation()
+            self.assertEqual([0.2], asked, "der Nutzer muss gefragt worden sein")
+            time.sleep(0.6)
+        self.assertFalse(mode.is_changed, "ohne Antwort muss die alte Auflösung zurück sein")
+        self.assertEqual(backend.calls, ["read", ("switch", 1920, 1080, 120), "restore"])
+        self.assertIn("keine Bestätigung", log.get_recent())
+
+    def test_a_confirmed_switch_stays(self):
+        backend = _FakeBackend(2560, 1440)
+        mode = display_mode.DisplayMode(backend=backend)
+        mode.set_confirm_prompt(lambda seconds: None)
+        with mock.patch.object(display_mode, "CONFIRM_SECONDS", 0.2):
+            mode.match_to(1920, 1080, 120)
+            mode.arm_confirmation()
+            mode.confirm_visible()
+            time.sleep(0.5)
+        self.assertTrue(mode.is_changed, "bestätigt heißt bleiben")
+        self.assertEqual(backend.calls, ["read", ("switch", 1920, 1080, 120)])
+
+    def test_saying_no_switches_back_at_once(self):
+        backend = _FakeBackend(2560, 1440)
+        mode = display_mode.DisplayMode(backend=backend)
+        mode.set_confirm_prompt(lambda seconds: None)
+        mode.match_to(1920, 1080, 120)
+        mode.arm_confirmation()
+        mode.reject_visible()
+        self.assertFalse(mode.is_changed)
+        self.assertEqual(backend.calls, ["read", ("switch", 1920, 1080, 120), "restore"])
+
+    def test_without_a_window_nothing_is_armed(self):
+        """Headless has nobody to ask, so it must behave exactly as it did before this existed."""
+        backend = _FakeBackend(2560, 1440)
+        mode = display_mode.DisplayMode(backend=backend)
+        with mock.patch.object(display_mode, "CONFIRM_SECONDS", 0.2):
+            mode.match_to(1920, 1080, 120)
+            mode.arm_confirmation()
+            time.sleep(0.5)
+        self.assertTrue(mode.is_changed, "ohne Dialog darf nichts zurückgeschaltet werden")
+
+    def test_a_dialog_that_will_not_open_keeps_the_mode(self):
+        backend = _FakeBackend(2560, 1440)
+        mode = display_mode.DisplayMode(backend=backend)
+        def broken(_seconds):
+            raise RuntimeError("kein Display")
+        mode.set_confirm_prompt(broken)
+        with mock.patch.object(display_mode, "CONFIRM_SECONDS", 0.2):
+            mode.match_to(1920, 1080, 120)
+            mode.arm_confirmation()
+            time.sleep(0.5)
+        self.assertTrue(mode.is_changed)
+        self.assertIn("Rückfrage ging nicht auf", log.get_recent())
+
     def test_refusal_logs_and_streams_scaled(self):
         backend = _FakeBackend(2560, 1440, switch_error="Logical monitors not adjacent")
         mode = display_mode.DisplayMode(backend=backend)
@@ -782,6 +875,28 @@ class ChooseCaptureModeTests(unittest.TestCase):
         chosen = display_mode.choose_capture_mode(self._developer_monitor(), 1280, 720, 60)
         self.assertNotEqual((chosen[0], chosen[1]), (1280, 720))
         self.assertGreaterEqual(chosen[2], 60 * display_mode.CAPTURE_REFRESH_FACTOR)
+
+
+    def test_an_ordinary_desktop_size_is_preferred(self):
+        """An exotic mode may not exist on someone else's screen, or may exist and show nothing. The
+        stream is scaled from an ordinary size instead - which costs sharpness, never the picture."""
+        modes = [display_mode.Mode(id="%dx%d" % (w, h), width=w, height=h, refresh=float(r))
+                 for w, h, r in ((1600, 900, 144), (1920, 1080, 240), (2560, 1440, 320))]
+        self.assertEqual((1920, 1080, 240.0), display_mode.choose_capture_mode(modes, 1536, 864, 60),
+                         "1600x900 waere kleiner, ist aber keine Standardgroesse")
+
+    def test_an_ordinary_size_that_is_too_slow_is_skipped(self):
+        """Measured on the development screen: 1280x720 tops out at 60 Hz there, and a 60 Hz desktop hands
+        the screen cast only about two thirds of the frames. Scaling beats losing a third of them."""
+        modes = [display_mode.Mode(id="720", width=1280, height=720, refresh=60.0),
+                 display_mode.Mode(id="1080", width=1920, height=1080, refresh=240.0)]
+        self.assertEqual((1920, 1080, 240.0), display_mode.choose_capture_mode(modes, 1280, 720, 60))
+
+    def test_a_stream_taller_than_every_ordinary_size_still_gets_one(self):
+        """1920x1088 fits inside no ordinary size; the largest this screen can do quickly is right."""
+        modes = [display_mode.Mode(id="1080", width=1920, height=1080, refresh=240.0),
+                 display_mode.Mode(id="1440", width=2560, height=1440, refresh=320.0)]
+        self.assertEqual((2560, 1440, 320.0), display_mode.choose_capture_mode(modes, 1920, 1088, 60))
 
     def test_plain_60hz_monitor_falls_back_to_the_originals_behaviour(self):
         modes = [self._mode(1280, 720, 60), self._mode(1920, 1080, 60), self._mode(2560, 1440, 60)]

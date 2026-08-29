@@ -116,6 +116,7 @@ class MockServer:
         self.loss_recovery = "intra"
         self.video_kbps = 6000              # the two knobs that decide the PS3's decode cost
         self.entropy_coder = "cavlc"
+        self.stream_size = (1280, 720)
         self.swap_mouse_sticks = False
         self.switch_display_mode = True
         self.start_calls = 0
@@ -126,8 +127,8 @@ class MockServer:
 
     @property
     def settings_summary(self):
-        return "1280x720 mit 60 fps, %d Mbit/s, %s, %s" % (
-            self.video_kbps // 1000, self.entropy_coder.upper(),
+        return "%dx%d mit 60 fps, %d Mbit/s, %s, %s" % (
+            self.stream_size[0], self.stream_size[1], self.video_kbps // 1000, self.entropy_coder.upper(),
             "Intra-Refresh" if self.loss_recovery == "intra" else "Keyframes")
 
     def start(self):
@@ -476,6 +477,9 @@ class MainWindowTest(unittest.TestCase):
                 # both lists come straight from protocol.py, so the rows can never offer a value the server rejects
                 self.assertEqual(len(protocol.BITRATE_CHOICES_KBPS), window.bitrate_row.get_model().get_n_items())
                 self.assertEqual(len(protocol.ENTROPY_CODERS), window.coder_row.get_model().get_n_items())
+                self.assertEqual(len(protocol.STREAM_SIZES), window.size_row.get_model().get_n_items())
+                self.assertEqual(protocol.STREAM_SIZES.index((1280, 720)), window.size_row.get_selected())
+                self.assertTrue(window.size_row.get_sensitive())
                 self.assertEqual(protocol.BITRATE_CHOICES_KBPS.index(6000), window.bitrate_row.get_selected())
                 self.assertEqual(protocol.ENTROPY_CODERS.index("cavlc"), window.coder_row.get_selected())
                 self.assertIn("(empfohlen)", ui.BITRATE_LABELS[protocol.BITRATE_CHOICES_KBPS.index(6000)])
@@ -487,9 +491,12 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual(12000, mock.video_kbps)
                 window.coder_row.set_selected(protocol.ENTROPY_CODERS.index("cabac"))
                 self.assertEqual("cabac", mock.entropy_coder)
+                window.size_row.set_selected(protocol.STREAM_SIZES.index((1536, 864)))
+                self.assertEqual((1536, 864), mock.stream_size)
                 # server -> window: something else moved them, the refresh tick must follow without a fight
                 mock.video_kbps = 4000
                 mock.entropy_coder = "cavlc"
+                mock.stream_size = (1280, 720)
 
             def followed_the_server():
                 window = holder["window"]
@@ -497,6 +504,8 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual(protocol.ENTROPY_CODERS.index("cavlc"), window.coder_row.get_selected())
                 self.assertIn("4 Mbit/s", window.subtitle_label.get_text())
                 self.assertIn("CAVLC", window.subtitle_label.get_text())
+                self.assertEqual(protocol.STREAM_SIZES.index((1280, 720)), window.size_row.get_selected())
+                self.assertIn("1280x720", window.subtitle_label.get_text())
                 self.assertEqual(4000, mock.video_kbps, "following the server must not write back to it")
                 mock.is_ps3_connected = True
                 mock.connected_ps3 = "10.42.0.151"
@@ -505,6 +514,7 @@ class MainWindowTest(unittest.TestCase):
                 window = holder["window"]
                 self.assertFalse(window.bitrate_row.get_sensitive())
                 self.assertFalse(window.coder_row.get_sensitive())
+                self.assertFalse(window.size_row.get_sensitive())
                 # a change that slips through between the PS3 connecting and the next tick is put back
                 window.bitrate_row.set_selected(protocol.BITRATE_CHOICES_KBPS.index(12000))
                 self.assertEqual(4000, mock.video_kbps, "the running stream keeps its bitrate")
@@ -512,7 +522,10 @@ class MainWindowTest(unittest.TestCase):
                 window.coder_row.set_selected(protocol.ENTROPY_CODERS.index("cabac"))
                 self.assertEqual("cavlc", mock.entropy_coder)
                 self.assertEqual(protocol.ENTROPY_CODERS.index("cavlc"), window.coder_row.get_selected())
+                window.size_row.set_selected(protocol.STREAM_SIZES.index((1792, 1008)))
+                self.assertEqual((1280, 720), mock.stream_size, "der laufende Stream behält seine Größe")
                 recent = log.get_recent()
+                self.assertIn("video: erst den Stream beenden, dann die Auflösung wechseln", recent)
                 self.assertIn("video: erst den Stream beenden, dann die Bitrate wechseln", recent)
                 self.assertIn("video: erst den Stream beenden, dann die Entropie-Codierung wechseln", recent)
                 mock.is_ps3_connected = False

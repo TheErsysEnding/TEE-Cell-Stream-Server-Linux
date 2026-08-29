@@ -12,12 +12,15 @@ is unchanged: this server speaks its wire protocol byte for byte.
 **Measured against a real console** (PS3 over Ethernet, Ryzen 9 5900X + RTX 4070 Ti SUPER, Ubuntu 26.04,
 GNOME 50 on Wayland):
 
-| | |
-|---|---|
-| Frame rate | 60 fps, longest gap 22 ms |
-| End-to-end latency | 25–30 ms |
-| Decode time on the PS3 | 19–20 ms per picture |
-| Dropped pictures | 0 of 893 |
+| | 1280×720 | 1920×1088 |
+|---|---|---|
+| Frame rate | 60 fps | 60 fps, longest gap 27 ms |
+| End-to-end latency | 25–30 ms | 40–47 ms |
+| Decode time on the PS3 | 19–20 ms | 38–44 ms |
+| Dropped pictures | 0 of 893 | 0 over a full match |
+
+Full HD at 60 fps on a 2006 console is not what the Windows original found (it measured 1080p at 80–120 ms
+and 27 fps). The difference is the encoder — see below.
 
 ## What you need
 
@@ -31,7 +34,7 @@ GNOME 50 on Wayland):
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.6.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.12.1_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
@@ -52,6 +55,24 @@ While streaming, every button goes to the PC, so the PS3 app uses SELECT as its 
 | SELECT + Square | presentation mode: vsync off → vsync → vsync + one-frame buffer |
 | SELECT + R3 | show/hide the stats panel |
 | SELECT + Triangle/Circle/L1/R1 | custom commands 1–4 |
+
+## The encoder decides what the console can do
+
+The PS3 decodes H.264 on its SPUs, and two encoder choices dominate everything else. Both were measured
+on the console, not guessed.
+
+**CAVLC, not CABAC.** CABAC's serial arithmetic decoding is the expensive part on an SPU: 36–40 ms per
+picture against 22 ms for CAVLC at the same bitrate, at 720p. Above the 16.7 ms a 60 fps frame gets, the
+console drops every other one.
+
+**x264 rather than NVENC, if the resolution is high.** `x264 --preset ultrafast` turns the in-loop
+deblocking filter off, and that filter is most of what H.264 costs to decode. Measured on the console at
+1920×1088: **147 ms per picture with NVENC, 38–44 ms with x264** — and `behind` went from climbing by
+about 53 a second to a flat zero. The picture is blockier, which more bitrate partly buys back.
+
+**Bitrate is almost free, and almost pointless.** At 1792×1008, going from 12 to 35 Mbit/s changed decode
+by 2 ms and added 5 ms of latency. For this decoder it is pixels that cost, not bits. Set it high enough
+to look good and no higher.
 
 ## Three things Linux needs that Windows does not
 

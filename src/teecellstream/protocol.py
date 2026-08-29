@@ -14,8 +14,28 @@ BEACON_INTERVAL_S = 1.0
 BEACON_REFRESH_TARGETS_S = 30
 
 # stream settings - deliberately baked in, this is an appliance (same values as the Windows server)
-WIDTH = 1280
-HEIGHT = 720
+# The stream size. 1280x720 is the original's, and for a long time the only one anyone had measured on a
+# console. The larger ones exist because CAVLC turned out to leave headroom: on the real PS3, CAVLC at
+# 17 Mbit/s decoded in 22 ms per picture where CABAC at the same rate needed 36-40. More pixels cost the
+# SPU decoder roughly in proportion, so these are an experiment and not a recommendation - upstream measured
+# 1080p at 80-120 ms and 27 fps, though with CABAC (upstream/ps3-app/README.md). The PS3 sizes its decoder
+# from the stream's own SPS and letterboxes whatever it gets, so nothing on that side has to be told.
+# Every one of these is a multiple of 16 in both directions. H.264 codes in 16x16
+# macroblocks, so a height like 900 or 1080 is rounded UP (to 912 / 1088) and the encoder adds a cropping
+# note for the display size. The PS3 ignores that note and takes the coded size - the console showed
+# "1600x912" and "1920x1088" - so a misaligned size costs decode time for rows nobody wants to see and
+# stretches the picture (1600x912 is 1.754, not 1.778). These sizes have neither problem.
+# Three of them are exactly 16:9; 1408x800 is 1.760, because an exact 16:9 that is also macroblock-aligned
+# needs a height divisible by 144 and there is none between 720 and 864. 0.9% off, and the PS3 letterboxes
+# to the TV anyway.
+# 1920x1088 rather than 1920x1080: 1080 is not a multiple of 16, so H.264 must code 1088 rows and mark
+# the extra 8 as cropped - and the PS3 app never reads the cropping fields (h264.c derives its size from
+# pic_width_in_mbs / pic_height_in_map_units alone, deliberately, because cellVdec must be given the CODED
+# size). A 1080 stream therefore appears as 1088 on the console anyway, with 8 rows of encoder padding on
+# screen and the picture squashed by that much. Sending 1088 real rows costs exactly the same to decode
+# and wastes none of them.
+STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088))
+WIDTH, HEIGHT = STREAM_SIZES[0]
 FPS = 60
 KBPS = 10000
 SEND_RATE_KBPS = KBPS * 3        # packets may leave faster than the video's own rate
@@ -26,7 +46,13 @@ SEND_RATE_KBPS = KBPS * 3        # packets may leave faster than the video's own
 # 2.8 ms per frame, CAVLC at the same rate 1.6 ms (-43%), 6 Mbit/s CAVLC 1.5 ms (-46%). On the real PS3
 # the same stream measured 38-40 ms decode at 11-13 Mbit/s CABAC - far past the 16.7 ms a 60 fps frame
 # gets, which is why the console dropped every other frame ("behind" climbing) and looked like 25 fps.
-BITRATE_CHOICES_KBPS = (4000, 6000, 8000, 10000, 12000)
+# 40 Mbit/s is the top because 45 and 50 could not get a stream started at all on the real console.
+# The mechanism is in the PS3 app: an intra-refresh stream carries exactly ONE keyframe, the anchor IDR
+# at the very start (ffmpeg's nvenc wrapper makes the IDR period infinite once intra refresh is on), and
+# stream.c will not feed the decoder anything before it - the first access unit must be that keyframe,
+# because it carries the SPS the decoder is built from. At those rates the anchor is several hundred
+# kilobytes going out in one burst; lose a single fragment of it and there is never a second chance.
+BITRATE_CHOICES_KBPS = (4000, 6000, 8000, 10000, 12000, 16000, 20000, 24000, 30000, 35000, 40000)
 ENTROPY_CODERS = ("cavlc", "cabac")
 
 SINFO_LEVEL = 42                 # H.264 level 4.2 covers everything we send; over-reserving on the PS3 is harmless
@@ -59,6 +85,14 @@ REFRESH_SWEEP_SECONDS = 1
 ANCHOR_KEYFRAME_SECONDS = 3600
 REFRESH_MAX_RATE_PERCENT = 140
 REFRESH_BUFFER_MS = 250
+
+# The PS3 reassembles one access unit into a fixed 1 MB slot and drops anything larger without a word
+# (FRAME_MAX_BYTES in stream.c, and the length check in its fragment handler). The VBV buffer is what
+# decides how big a single picture may get, so above ~32 Mbit/s the 250 ms window alone would let a frame
+# cross that line. Cap it with headroom; below 26 Mbit/s this changes nothing, so every measurement made
+# so far still describes the stream it described.
+PS3_MAX_AU_BYTES = 1024 * 1024
+MAX_VBV_KBIT = PS3_MAX_AU_BYTES * 8 * 80 // 100 // 1000    # 80% of the slot
 
 # sticks
 STICK_MIN = -128

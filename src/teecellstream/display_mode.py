@@ -189,6 +189,15 @@ def rank_modes(modes: list, width: int, height: int, refresh_hz: float) -> list:
 # a frame against 8.3 MB for 1920x1080).
 CAPTURE_REFRESH_FACTOR = 1.5   # 60 fps wants a 90 Hz desktop before the compositor keeps up
 
+# Sizes every monitor is expected to know. An exotic mode - 1408x800, 1536x864, 1792x1008 - may not exist
+# on someone else's screen, or may exist and show nothing, and a black desktop is a bad thing to hand a
+# user who is looking at their TV. So the desktop is put into an ordinary size and the stream is scaled
+# from it. Only sizes that also clear CAPTURE_REFRESH_FACTOR qualify: on a screen whose 1280x720 tops out
+# at 60 Hz, switching to it would cost a third of the frames, which is worse than any scaling.
+PREFERRED_DESKTOP_SIZES = ((1280, 720), (1920, 1080), (2560, 1440))
+
+CONFIRM_SECONDS = 15
+
 
 def choose_capture_mode(modes: list, stream_width: int, stream_height: int, fps: int) -> tuple:
     """(width, height, refresh) the desktop should run at while streaming `stream_width`x`stream_height`@fps."""
@@ -199,6 +208,17 @@ def choose_capture_mode(modes: list, stream_width: int, stream_height: int, fps:
         # no mode is fast enough (a plain 60 Hz monitor): the third is lost whatever we do, so fall back to
         # the original's pixel-for-pixel switch, which at least keeps the capture small and the picture sharp
         return stream_width, stream_height, float(fps)
+    # an ordinary size first, smallest that still covers the stream; failing that, the largest ordinary
+    # size this screen can do quickly - a 1920x1088 stream has no ordinary size big enough, and 1920x1080
+    # is both the closest and very nearly 1:1
+    covering = [size for size in PREFERRED_DESKTOP_SIZES if size[0] * size[1] >= stream_width * stream_height]
+    for candidates in (covering, list(reversed(PREFERRED_DESKTOP_SIZES))):
+        for width, height in candidates:
+            fits = [mode for mode in roomy if (mode.width, mode.height) == (width, height)]
+            if fits:
+                best = max(fits, key=lambda mode: mode.refresh)
+                return best.width, best.height, best.refresh
+
     best = min(roomy, key=lambda mode: (mode.width * mode.height, -mode.refresh))
     return best.width, best.height, best.refresh
 
@@ -593,6 +613,9 @@ class DisplayMode:
         self._backend = backend          # chosen on first use, so constructing one never touches DBus
         self._changed = False
         self._original_size: tuple[int, int] = (0, 0)
+        self._confirm_prompt = None            # set by the app; see arm_confirmation
+        self._confirmed = threading.Event()
+        self._last_announced = None            # keeps a repeated PLAY from repeating the same log line
 
     @property
     def is_changed(self) -> bool:   # desktop is currently switched and owes a restore()
@@ -619,11 +642,24 @@ class DisplayMode:
             log.write("display: konnte die Modi nicht lesen (%s)" % error)
             modes = []
         width, height, refresh = choose_capture_mode(modes, stream_width, stream_height, fps)
-        if modes and (width, height) != (stream_width, stream_height):
-            log.write("display: streame %dx%d, schalte den Desktop dafür auf %dx%d@%g - kleiner ginge nur "
-                      "mit weniger Bildwiederholrate, und darunter gibt die Bildschirmaufnahme nur noch "
-                      "zwei Drittel der Bilder heraus" % (stream_width, stream_height, width, height, refresh))
-        return self.match_to(width, height, refresh)
+        # only say it once per target: a repeated PLAY comes through here again, and the old wording
+        # promised a switch even when the desktop was already sitting on the chosen mode
+        announce = modes and self._last_announced != (stream_width, stream_height, width, height)
+        self._last_announced = (stream_width, stream_height, width, height)
+        was_changed = self._changed
+        switched = self.match_to(width, height, refresh)
+        if announce:
+            if self._changed and not was_changed:
+                pass            # match_to logged the switch itself, with the sizes it really used
+            elif switched:
+                log.write("display: streame %dx%d, der Desktop steht schon auf %dx%d@%g - nichts umzuschalten"
+                          % (stream_width, stream_height, width, height, refresh))
+            else:
+                log.write("display: streame %dx%d, wollte den Desktop auf %dx%d@%g bringen - ging nicht, "
+                          "es wird stattdessen skaliert" % (stream_width, stream_height, width, height, refresh))
+        if switched:
+            self.arm_confirmation()
+        return switched
 
     def match_to(self, width: int, height: int, refresh_hz: float) -> bool:
         """True if the desktop is now at this size (or already was). False means we left it alone and the stream
@@ -654,14 +690,52 @@ class DisplayMode:
 
             self._original_size = (snapshot.width, snapshot.height)
             self._changed = True
-            log.write("display: Desktop auf %dx%d umgeschaltet (war %dx%d; %s); wird nach dem Stream wiederhergestellt"
-                      % (width, height, snapshot.width, snapshot.height, detail))
+            log.write("display: Desktop auf %dx%d umgeschaltet (war %dx%d; %s); wird nach dem Stream "
+                      "wiederhergestellt" % (width, height, snapshot.width, snapshot.height, detail))
             return True
+
+    def set_confirm_prompt(self, prompt) -> None:
+        """The app hands in something that ASKS the user whether they can still see their screen.
+        It is called from a worker thread and must return at once - the GUI schedules its own dialog."""
+        self._confirm_prompt = prompt
+
+    def confirm_visible(self) -> None:
+        """The user answered yes: keep the mode."""
+        self._confirmed.set()
+
+    def reject_visible(self) -> None:
+        """The user answered no - or could not answer, which is the case this exists for."""
+        self._confirmed.set()
+        self.restore()
+
+    def arm_confirmation(self) -> None:
+        """A monitor may accept a mode and show nothing. The user is then looking at a black desktop with
+        no way to click anything, so the timeout - not the button - is the actual safety net: unless
+        someone confirms within CONFIRM_SECONDS, the old mode comes back by itself."""
+        prompt = self._confirm_prompt
+        if prompt is None or not self._changed:
+            return
+        self._confirmed.clear()
+
+        def wait_then_revert():
+            if self._confirmed.wait(CONFIRM_SECONDS):
+                return
+            log.write("display: keine Bestätigung nach %d s - schalte auf die alte Auflösung zurück"
+                      % CONFIRM_SECONDS)
+            self.restore()
+
+        threading.Thread(target=wait_then_revert, name="display-confirm", daemon=True).start()
+        try:
+            prompt(CONFIRM_SECONDS)
+        except Exception as error:   # noqa: BLE001 - a dialog that will not open must not cost the mode
+            log.write("display: Rückfrage ging nicht auf (%s), lasse die Auflösung stehen" % error)
+            self._confirmed.set()
 
     def restore(self) -> None:
         with self._gate:
             if not self._changed:
                 return
+            self._confirmed.set()   # a restore for any reason ends the countdown
             self._changed = False   # cleared first: a second call must never fight the first
             width, height = self._original_size
             try:

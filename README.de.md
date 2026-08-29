@@ -17,7 +17,7 @@ eingestecktes Pad sehen.
 ## Installation (1 Klick)
 
 ```
-sudo apt install ./tee-cell-stream-server_1.4.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.12.1_all.deb
 ```
 
 Alles Nötige (ffmpeg mit NVENC, GStreamer/PipeWire, GTK4/libadwaita, evdev, Portal) kommt aus den

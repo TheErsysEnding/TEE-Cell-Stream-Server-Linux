@@ -38,12 +38,16 @@ class _Session:
     """One PLAY's worth of state. A fresh object per start() so a pump that is still winding down can never
     read the flags of the session that replaced it."""
 
-    __slots__ = ("target", "active", "intra", "process", "capture", "encoder")
+    __slots__ = ("target", "active", "intra", "width", "height", "process", "capture", "encoder")
 
-    def __init__(self, target, intra: bool):
+    def __init__(self, target, intra: bool, width: int, height: int):
         self.target = target
         self.active = True
         self.intra = intra              # what SINFO promised the PS3: an intra-refresh stream (True) or keyframes
+        # pinned for the session: SINFO goes out before the encoder starts, and a size changed in the window
+        # in between would leave the two disagreeing
+        self.width = width
+        self.height = height
         self.process: subprocess.Popen | None = None
         self.capture = None
         self.encoder: encoders.VideoEncoder | None = None
@@ -54,7 +58,8 @@ class LiveStreamer:
     # the link can actually carry (WiFi to the PS3 tops out ~22Mbps - its radio is 802.11g), or a keyframe's
     # burst overruns it and the picture freezes until the next one.
     def __init__(self, sock, ffmpeg_path, fps, kbps, width, height, send_rate_kbps, create_capture,
-                 encoders_to_try, loss_recovery, on_all_encoders_failed, video_kbps=None, entropy_coder=None):
+                 encoders_to_try, loss_recovery, on_all_encoders_failed, video_kbps=None, entropy_coder=None,
+                 stream_size=None):
         self._sock = sock
         self._ffmpeg_path = ffmpeg_path
         self._fps = fps
@@ -70,6 +75,7 @@ class LiveStreamer:
         # effect on the next connect without restarting the server. None keeps the constructor's value.
         self._video_kbps = video_kbps
         self._entropy_coder = entropy_coder
+        self._stream_size = stream_size
 
         # SINFO's level field. The Windows original had to get it right because its PS3 build sized the
         # decoder from it; this PS3 app does not - it reads coded size, level and ref frames out of the
@@ -102,6 +108,13 @@ class LiveStreamer:
         chosen = self._entropy_coder() if callable(self._entropy_coder) else self._entropy_coder
         return chosen if chosen in protocol.ENTROPY_CODERS else "auto"
 
+    def _current_size(self) -> tuple[int, int]:
+        """The stream size for the next session; anything unknown falls back to the constructor's."""
+        chosen = self._stream_size() if callable(self._stream_size) else self._stream_size
+        if isinstance(chosen, (tuple, list)) and tuple(chosen) in protocol.STREAM_SIZES:
+            return int(chosen[0]), int(chosen[1])
+        return self._width, self._height
+
     # the PS3 repeats PLAY until it hears back, so a repeat is not a new session: answer it and carry on.
     # restarting on every repeat meant the encoder hunt began again each time and never finished.
     @property
@@ -122,7 +135,8 @@ class LiveStreamer:
                 self.send_stream_info(target)
                 return
             self._stop_locked()
-            session = _Session(target, self._announced_intra())
+            width, height = self._current_size()
+            session = _Session(target, self._announced_intra(), width, height)
             self._session = session
             self.send_stream_info(target)   # answer the PS3 straight away: bringing an encoder up can take seconds
             self._pump_thread = threading.Thread(target=self._run_pump, args=(session,), name="live-pump", daemon=True)
@@ -142,10 +156,11 @@ class LiveStreamer:
     def send_stream_info(self, target) -> None:
         session = self._session
         if session is not None and session.active and session.target == target:
-            intra = session.intra
+            intra, width, height = session.intra, session.width, session.height
         else:
             intra = self._announced_intra()
-        info = ("SINFO %d %d %d %d %d %d" % (self._width, self._height, self._sinfo_level, protocol.SINFO_REFS,
+            width, height = self._current_size()
+        info = ("SINFO %d %d %d %d %d %d" % (width, height, self._sinfo_level, protocol.SINFO_REFS,
                                             self._fps, 1 if intra else 0)).encode("ascii")
         try:
             for _ in range(3):
@@ -244,7 +259,7 @@ class LiveStreamer:
             return None
         session.capture = capture
         try:
-            started = capture.start(self._width, self._height, self._fps)
+            started = capture.start(session.width, session.height, self._fps)
         except Exception as error:   # noqa: BLE001
             log.write("live: Bildschirmaufnahme (%s) abgebrochen: %s" % (capture.name, error))
             started = False
@@ -262,7 +277,7 @@ class LiveStreamer:
         raw_pipe = "pipe:0" in input_args
         loss_recovery = "intra" if session.intra else "keyframe"   # what SINFO promised, whatever rung this is
         try:
-            args = encoders.build_ffmpeg_args(self._ffmpeg_path, encoder, input_args, self._width, self._height,
+            args = encoders.build_ffmpeg_args(self._ffmpeg_path, encoder, input_args, session.width, session.height,
                                               self._fps, self._current_kbps(), loss_recovery, capture.needs_scale,
                                               self._current_entropy_coder())
             process = _spawn_ffmpeg(args, raw_pipe)
@@ -366,6 +381,7 @@ class LiveStreamer:
 
         first_frame_seen.set()   # release the timeout thread if we're leaving for any other reason
         timeout_thread.join()
+        died_on_its_own = process.poll() is not None   # note it before we terminate it ourselves
 
         # ffmpeg first (SIGTERM only, no wait), then the capture: a feeder blocked on a write to a stalled
         # encoder is freed by the pipe breaking, so stopping the capture can never wait on it. then reap.
@@ -385,6 +401,13 @@ class LiveStreamer:
         if frame_id == 0:
             log.write("live: Encoder lieferte keine Frames. ffmpeg sagte:\n" + error_tail["text"].strip())
             return False
+        # An encoder that died mid-stream used to leave nothing behind but the feeder's "broken pipe":
+        # the reason was drained into error_tail and then thrown away, because only the zero-frame case
+        # printed it. A session that ends because ffmpeg quit is exactly when that text is wanted.
+        # session.active is still true here when the pump is leaving on its own rather than being stopped.
+        if session.active and died_on_its_own and error_tail["text"].strip():
+            log.write("live: ffmpeg hat sich nach %d Frames beendet. Es sagte:\n%s"
+                      % (frame_id, error_tail["text"].strip()))
         log.write("live: %d Frames gesendet" % frame_id)
         return True
 
