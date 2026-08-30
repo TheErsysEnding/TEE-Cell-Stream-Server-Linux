@@ -61,6 +61,31 @@ LOSS_RECOVERY_HINTS = ("Standard: repariert das Bild laufend, ohne Bitratenspitz
 COMMAND_KINDS = ("none", "run")
 COMMAND_KIND_LABELS = ("Keine", "Befehl oder URI ausführen")
 
+# The grid hands the console `fps` pictures a second whatever the desktop does. A source ABOVE that has
+# some of its pictures replaced before their slot, and unevenly - which is exactly what judder is, even
+# while every counter still reads 60. Measured across sessions: a source at ~60/s put 94-97 % of pictures
+# on the grid, one at 67-83/s only 68-76 %. Below the band the source itself is simply slow and pictures
+# are held; that is visible for a different reason and is not the capture's doing.
+# The band is the servo's, see capture.SERVO_SLEW_FRACTION: inside it the grid follows the source exactly.
+SOURCE_BAND = 0.0333
+
+
+def source_rate_text(captured_fps: int, fps: int) -> str:
+    """The live source rate for the status line, with a word on it when it is outside the servo band."""
+    if captured_fps <= 0:
+        return ""
+    # captured_fps is a whole number, so the band has to be rounded outwards or the two rates at its very
+    # edge read as outside it. The servo was measured locking at 62/s and letting go at 63.
+    low, high = int(fps * (1 - SOURCE_BAND)), -int(-fps * (1 + SOURCE_BAND) // 1)
+    if captured_fps > high:
+        note = " – über dem Takt, Bilder werden verworfen"
+    elif captured_fps < low:
+        note = " – unter dem Takt, Bilder werden gehalten"
+    else:
+        note = " – im Takt"
+    return " · Quelle %d/s%s" % (captured_fps, note)
+
+
 STATUS_STOPPED = "Gestoppt"
 STATUS_WAITING = "Warte auf eine PS3 …"
 STATUS_CONNECTED = "PS3 verbunden: "
@@ -693,6 +718,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.status_label.set_text(status)
 
         subtitle = server.settings_summary if (armed or server.trip_reason is None) else server.trip_reason
+        if connected:
+            subtitle += source_rate_text(server.captured_fps, protocol.FPS)
         if self.subtitle_label.get_text() != subtitle:
             self.subtitle_label.set_text(subtitle)
 

@@ -118,6 +118,8 @@ class MockServer:
         self.entropy_coder = "cavlc"
         self.rate_control = "vbr"
         self.stream_size = (1280, 720)
+        self.slice_count = 1
+        self.captured_fps = 0               # what the desktop capture delivers; 0 = no stream, no readout
         self.swap_mouse_sticks = False
         self.switch_display_mode = True
         self.display_strategy = "capture"
@@ -384,10 +386,15 @@ class MainWindowTest(unittest.TestCase):
                 mock.trip_reason = None
                 mock.is_ps3_connected = True
                 mock.connected_ps3 = "10.42.0.151"
+                mock.captured_fps = 70      # a source over the grid: the status line has to say so
 
             def connected():
                 window = holder["window"]
                 self.assertEqual(ui.STATUS_CONNECTED + "10.42.0.151", window.status_label.get_text())
+                subtitle = window.subtitle_label.get_text()
+                self.assertTrue(subtitle.startswith(mock.settings_summary), subtitle)
+                self.assertIn("Quelle 70/s", subtitle)
+                self.assertIn("verworfen", subtitle)
                 self.assertTrue(window.status_dot.has_css_class("status-dot-live"))
                 self.assertFalse(window.status_dot.has_css_class("status-dot-idle"))
                 self.assertFalse(window.encoder_row.get_sensitive())
@@ -398,6 +405,7 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual(0, window.encoder_row.get_selected())
                 mock.is_ps3_connected = False
                 mock.connected_ps3 = None
+                mock.captured_fps = 0
 
             def disconnected_and_choices():
                 window = holder["window"]
@@ -1357,3 +1365,28 @@ class OldSettingsFileTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourceRateTextTest(unittest.TestCase):
+    """The status line's live source rate. The band has to be rounded outwards because captured_fps is a
+    whole number: the servo was measured locking at 62/s and letting go at 63, so both edges belong inside."""
+
+    def test_nothing_while_no_stream_runs(self):
+        self.assertEqual(ui.source_rate_text(0, 60), "")
+
+    def test_inside_the_band_says_so(self):
+        for rate in (58, 59, 60, 61, 62):
+            self.assertIn("im Takt", ui.source_rate_text(rate, 60), rate)
+            self.assertIn("Quelle %d/s" % rate, ui.source_rate_text(rate, 60))
+
+    def test_above_the_band_names_the_consequence(self):
+        for rate in (63, 70, 83):
+            self.assertIn("verworfen", ui.source_rate_text(rate, 60), rate)
+
+    def test_below_the_band_names_the_other_one(self):
+        for rate in (20, 45, 57):
+            self.assertIn("gehalten", ui.source_rate_text(rate, 60), rate)
+
+    def test_the_band_follows_the_frame_rate_it_is_given(self):
+        self.assertIn("im Takt", ui.source_rate_text(30, 30))
+        self.assertIn("verworfen", ui.source_rate_text(40, 30))

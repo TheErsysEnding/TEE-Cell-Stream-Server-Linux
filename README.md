@@ -38,7 +38,7 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.20.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.21.0_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly

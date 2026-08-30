@@ -1,3 +1,14 @@
+tee-cell-stream-server (1.21.0) unstable; urgency=medium
+
+  * Die Statuszeile zeigt waehrend eines Streams, wie viele Bilder pro Sekunde
+    die Quelle liefert - und sagt dazu, ob das im Takt liegt. Liefert der
+    Desktop mehr als 60, werden Bilder vor ihrem Platz ueberholt und das Bild
+    ruckelt, obwohl jeder Zaehler weiter 60 anzeigt. Ueber mehrere Sitzungen
+    gemessen: Quelle ~60/s ergab 94-97 %% der Bilder im Takt, Quelle 67-83/s
+    nur 68-76 %%. Bisher war diese Zahl erst nach dem Stoppen im Log zu sehen.
+
+ -- TEE <github@teebug.de>  Sun, 30 Aug 2026 13:30:00 +0200
+
 tee-cell-stream-server (1.20.0) unstable; urgency=medium
 
   * Neuer Versuchsschalter "Slices je Bild" (1/2/4, nur x264). Er dient der

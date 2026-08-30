@@ -3,7 +3,7 @@
 Linux port of cell-stream-server (ps3-dev, Apache-2.0, release 174-a5dd795).
 """
 
-__version__ = "1.20.0"
+__version__ = "1.21.0"
 UPSTREAM_VERSION = "174-a5dd795"
 
 APP_ID = "de.tee.CellStreamServer"

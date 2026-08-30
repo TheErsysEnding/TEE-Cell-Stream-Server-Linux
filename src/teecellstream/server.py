@@ -296,6 +296,11 @@ class Server:
         log.write("video: Ratensteuerung ab dem nächsten Stream: " + value.upper())
 
     @property
+    def captured_fps(self) -> int:
+        """What the desktop capture is currently delivering, per second (0 = no stream). See LiveStreamer."""
+        return int(getattr(self.live_streamer, "captured_fps", 0) or 0)
+
+    @property
     def slice_count(self) -> int:
         """Slices per picture, x264 only - a TEST setting, see protocol.SLICE_COUNTS. 1 is what every
         measurement so far was made with, and anything unreadable falls back to it."""

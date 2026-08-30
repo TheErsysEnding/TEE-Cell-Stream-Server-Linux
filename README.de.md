@@ -27,7 +27,7 @@ Details im englischen [README.md](README.md).
 ## Installation (1 Klick)
 
 ```
-sudo apt install ./tee-cell-stream-server_1.20.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.21.0_all.deb
 ```
 
 Alles Nötige (ffmpeg mit NVENC, GStreamer/PipeWire, GTK4/libadwaita, evdev, Portal) kommt aus den

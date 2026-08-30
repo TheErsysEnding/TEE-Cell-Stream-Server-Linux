@@ -122,6 +122,17 @@ class LiveStreamer:
         chosen = self._rate_control() if callable(self._rate_control) else self._rate_control
         return chosen if chosen in protocol.RATE_CONTROLS else "vbr"
 
+    @property
+    def captured_fps(self) -> int:
+        """Pictures the SOURCE delivered in the last second, 0 when nothing is streaming. This is the number
+        that decides whether the picture judders: the grid hands the console 60 a second whatever happens, so
+        a source above 60 has some of its pictures superseded before their slot, and unevenly - which is what
+        the eye sees. Measured across sessions: source ~60/s gave 94-97 % of pictures on the grid, source
+        67-83/s gave 68-76 %. There is no display for it while a stream runs, which is why it is exposed."""
+        session = self._session
+        capture = session.capture if session is not None else None
+        return int(getattr(capture, "captured_fps", 0) or 0)
+
     def _current_slice_count(self) -> int:
         """Slices per picture for the x264 rung; anything unknown (including None) means the proven 1."""
         chosen = self._slice_count() if callable(self._slice_count) else self._slice_count
