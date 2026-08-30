@@ -94,8 +94,9 @@ def send_access_unit(sock, target: tuple[str, int], frame_id: int, data, keyfram
 #
 # Without that test every slice after the first would look like the beginning of the next picture, and a
 # 4-slice picture would leave here as 4 access units with 4 frame ids. The console would then be handed
-# quarter-pictures as if they were whole ones. Multiple slices HAVE been tried before and measured worse
-# on the console (1.12.1) - with this splitter underneath, which is reason enough to distrust that result.
+# quarter-pictures as if they were whole ones - which is what happened, and what made the 1.12.1 verdict on
+# slices worthless. Re-measured with this fixed: slices really are worse, but by a factor and for a reason
+# nobody knew before (protocol.SLICE_COUNTS). The framing has to be right either way.
 #
 # start codes are found with bytes.find (C speed): at 10Mbit/s that is ~1000 NALs a second, and walking
 # the buffer byte by byte in Python was measured far too slow to keep up with the encoder.

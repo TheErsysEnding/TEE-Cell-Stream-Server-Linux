@@ -82,13 +82,28 @@ ENTROPY_CODERS = ("cavlc", "cabac")
 RATE_CONTROLS = ("vbr", "quality", "cbr")
 QUALITY_CRF = 20                 # x264's -crf for the "quality" mode: visually clean without being wasteful
 
-# Slices per picture - a TEST setting, x264 only, and 1 is what every measurement in this repo was made with.
-# The idea behind trying more: cellVdec is handed several SPUs (4, in the console app's decode-h264.c), and a
-# decoder that splits its work by slice can only use them if the picture HAS several. It was tried once, in
-# 1.12.1, and measured worse - but that run is not worth much: the slices came from x264's sliced-threads on a
-# 24-core machine (so ~24 of them, not 4), it predates the HRD timing that later halved the latency, and the
-# splitter it ran through mis-framed multi-slice streams (see stream_sender.AnnexBSplitter). Hence a clean
-# switch instead of a fixed 1.
+# Slices per picture - a TEST setting, x264 only, and 1 stays the default because it MEASURED best.
+#
+# The idea was: cellVdec is handed several SPUs (4, in the console app's decode-h264.c), and a decoder that
+# splits its work by slice can only use them if the picture HAS several. It had been tried once before, in
+# 1.12.1, and dismissed - but that run was worthless three times over: the slices came from x264's
+# sliced-threads on a 24-core machine (~24 of them, not 4), it predates the HRD timing that later halved the
+# latency, and the splitter it ran through mis-framed multi-slice streams entirely (479 access units for 120
+# pictures - see stream_sender.AnnexBSplitter). So it was re-run properly.
+#
+# Measured on the real console, 1920x1088, x264, 35 Mbit/s, CAVLC, intra refresh, everything else equal:
+#     1 slice   ~29-33 ms latency, 22-30 ms decode   <- best, and the default
+#     2 slices  minimally worse
+#     4 slices  ~40 ms latency, ~35 ms decode        <- clearly worse
+# No change in smoothness at any setting, which was never what slices were about.
+#
+# So decode cost RISES with the slice count while the bit cost does not (+0.13% at 4 slices, measured): each
+# slice costs the decoder a fixed setup and returns nothing. cellVdec does not divide its work by slice.
+#
+# What that does and does not settle: it rules out SLICE-level parallelism, not all of it. A decoder can also
+# split a single slice by macroblock row (a wavefront), and that would use extra SPUs without needing slices -
+# invisible to this test. So "does a 5th SPU help" is still open, and only building the console app with
+# VDEC_SPU_COUNT changed can answer it. The switch stays for exactly that comparison.
 SLICE_COUNTS = (1, 2, 4)
 
 SINFO_LEVEL = 42                 # the floor: H.264 level 4.2 covers everything up to and including 1920x1088

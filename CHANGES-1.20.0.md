@@ -87,3 +87,35 @@ be pointless too. Either outcome answers a question that would otherwise need a 
 
 434 tests green. New: multi-slice framing across three chunkings (whole, split, byte-by-byte), the slice
 report, and single-slice pictures still reporting as one.
+
+---
+
+# Result (measured on the console, same day)
+
+1920x1088, x264, 35 Mbit/s, CAVLC, intra refresh, everything else identical between runs:
+
+| slices | latency | decode | smoothness |
+|---|---|---|---|
+| **1** | **~29–33 ms** | **22–30 ms** | unchanged |
+| 2 | minimally worse | | unchanged |
+| 4 | ~40 ms | ~35 ms | unchanged |
+
+**More slices are worse, monotonically.** The default stays 1.
+
+The bit cost cannot explain it — 4 slices cost 0.13 % more bits at constant quality and nothing at all at
+constant bitrate, while decode time rose by roughly a quarter. So the extra cost is per-slice setup inside
+the decoder, paid four times over and returning nothing: **cellVdec does not divide its work by slice.**
+
+## What that settles, and what it does not
+
+It settles the slice question properly, for the first time — the earlier verdict happened to point the same
+way, but it was measured through a splitter that was quartering the pictures, so it was not evidence of
+anything.
+
+It does **not** settle the SPU question. A decoder can also split a single slice by macroblock row (a
+wavefront), and that form of parallelism would use extra SPUs without ever needing more than one slice —
+completely invisible to this test. Whether `VDEC_SPU_COUNT 4` → 5 helps therefore still requires building
+the console app with that number changed.
+
+The switch stays in place for exactly that comparison: if the SPU count is ever raised, the slice runs are
+the control group.

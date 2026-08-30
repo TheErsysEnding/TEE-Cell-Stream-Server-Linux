@@ -1,3 +1,25 @@
+tee-cell-stream-server (1.20.0) unstable; urgency=medium
+
+  * Neuer Versuchsschalter "Slices je Bild" (1/2/4, nur x264). Er dient der
+    Frage, ob der PS3-Decoder seine SPUs slice-weise nutzt - faellt die
+    Decodezeit mit 4 Slices, tut er es; aendert sich nichts, tut er es nicht.
+  * Der Annex-B-Splitter konnte bisher gar keine Mehrfach-Slices: er beendete
+    eine Zugriffseinheit an der ersten NAL nach einem Bild, was nur bei genau
+    einem Slice je Bild richtig ist. An einem echten x264-Strom gemessen kamen
+    so 479 Einheiten fuer 120 Bilder heraus - jeder Slice ging als eigenes
+    Frame raus, die PS3 bekam Viertelbilder als ganze serviert. Er liest jetzt
+    first_mb_in_slice (ein Bit-Test, keine Kosten). Einzel-Slice-Stroeme
+    verhalten sich unveraendert.
+  * Damit ist auch die aeltere Messung hinfaellig, die Slices verworfen hatte:
+    sie lief ueber sliced-threads (also ~24 Slices auf 24 Kernen, nicht 4),
+    war aelter als die HRD-Zeitparameter und ging durch ebendiesen Splitter.
+  * Jeder Stream protokolliert am Ende, was tatsaechlich rausging: Bilder,
+    Slices je Bild und Bytes je Bild.
+  * Gemessene Kosten von 4 Slices bei 1920x1088: +0,13 % Bitrate bei
+    konstanter Qualitaet, 0 bei konstanter Bitrate.
+
+ -- TEE <github@teebug.de>  Sun, 30 Aug 2026 11:00:00 +0200
+
 tee-cell-stream-server (1.12.1) unstable; urgency=medium
 
   * Das Log sagt jetzt die Wahrheit, wenn der Desktop bereits auf der
