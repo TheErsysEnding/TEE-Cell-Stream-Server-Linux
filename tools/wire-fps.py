@@ -99,8 +99,21 @@ def report(times: list[float], per_second: bool) -> int:
             on_grid += 1
     share = on_grid / len(gaps)
 
+    # The 12 most COMMON gaps, not the 12 smallest: sorted(...)[:12] showed the sub-frame end of the
+    # distribution and cut away everything around 16.7 ms - exactly the part that says whether the stream
+    # is even. Bursts (short gaps) and held pictures (long ones) both matter, so both must be visible.
     histogram = collections.Counter(round(g) for g in gaps if g < 5 * FRAME_INTERVAL_MS)
-    print("Histogramm (ms):", ", ".join("%d:%dx" % (k, v) for k, v in sorted(histogram.items())[:12]))
+    common = sorted(histogram.most_common(12))
+    print("Histogramm (ms):", ", ".join("%d:%dx" % (k, v) for k, v in common))
+
+    # how the gaps fall relative to one frame interval - the shape a count of 60/s cannot show
+    short = sum(1 for g in gaps if g < FRAME_INTERVAL_MS * 0.75)
+    long_ = sum(1 for g in gaps if g > FRAME_INTERVAL_MS * 1.25)
+    doubled = sum(1 for g in gaps if g >= FRAME_INTERVAL_MS * 1.75)
+    print("Verteilung: %.0f %% zu früh (<12.5 ms), %.0f %% im Fenster, %.0f %% zu spät (>20.8 ms), "
+          "davon %d sichtbare Hänger (>=29 ms)"
+          % (100.0 * short / len(gaps), 100.0 * (len(gaps) - short - long_) / len(gaps),
+             100.0 * long_ / len(gaps), doubled))
 
     print()
     if share >= 0.8:

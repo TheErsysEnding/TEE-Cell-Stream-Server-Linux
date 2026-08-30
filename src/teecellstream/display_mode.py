@@ -196,7 +196,38 @@ CAPTURE_REFRESH_FACTOR = 1.5   # 60 fps wants a 90 Hz desktop before the composi
 # at 60 Hz, switching to it would cost a third of the frames, which is worse than any scaling.
 PREFERRED_DESKTOP_SIZES = ((1280, 720), (1920, 1080), (2560, 1440))
 
+# The three strategies the user can pick between. "capture" is the measured default above; "sixty" exists
+# because the default's premise - more refresh is always better - has a cost the frame COUNT never showed:
+# a 320 Hz desktop hands the screen cast ~69 pictures a second at uneven intervals, our 60 Hz grid takes the
+# newest of them, and 15 % are superseded before their slot. Measured on the real console: content spacing
+# 75 % within a quarter-interval of ideal, 756 visibly held pictures in a 7-minute session. At 60 Hz there
+# is no beat left at all - the compositor and the grid share one clock - but the same measurement that gave
+# us CAPTURE_REFRESH_FACTOR says the cast then hands out only two thirds of them. Evenly spaced 40 against
+# unevenly spaced 58: which of those an eye prefers is not something to reason about, so it is a switch.
+DISPLAY_STRATEGIES = ("off", "capture", "sixty")
+
 CONFIRM_SECONDS = 15
+
+
+def choose_sixty_hz_mode(modes: list, stream_width: int, stream_height: int, fps: int) -> tuple:
+    """(width, height, refresh) for the "no beat" strategy: an ordinary size at the stream's own frame rate.
+
+    Everything shares one clock this way - the game, the compositor, our grid and the console - so no picture
+    can be superseded before its slot and none can be held past it. What it costs is what
+    CAPTURE_REFRESH_FACTOR was written for; whether that trade is worth it is what the switch is for."""
+    exact = [mode for mode in modes
+             if mode.width >= stream_width and mode.height >= stream_height
+             and abs(mode.refresh - fps) <= 1.0 and not mode.is_variable_rate]
+    if not exact:
+        return stream_width, stream_height, float(fps)
+    for width, height in PREFERRED_DESKTOP_SIZES:
+        if width * height < stream_width * stream_height:
+            continue
+        fits = [mode for mode in exact if (mode.width, mode.height) == (width, height)]
+        if fits:
+            return fits[0].width, fits[0].height, fits[0].refresh
+    best = min(exact, key=lambda mode: mode.width * mode.height)
+    return best.width, best.height, best.refresh
 
 
 def choose_capture_mode(modes: list, stream_width: int, stream_height: int, fps: int) -> tuple:
@@ -633,7 +664,7 @@ class DisplayMode:
                 log.write("display: weder Mutter (DBus) noch X11 gefunden - die Auflösung wird nicht umgeschaltet")
         return self._backend
 
-    def match_for_capture(self, stream_width: int, stream_height: int, fps: int) -> bool:
+    def match_for_capture(self, stream_width: int, stream_height: int, fps: int, strategy: str = "capture") -> bool:
         """Put the desktop into the mode that CAPTURES best for this stream - see choose_capture_mode. The
         stream's own size is only the fallback: matching it exactly is what costs a third of the frames."""
         try:
@@ -641,7 +672,8 @@ class DisplayMode:
         except Exception as error:   # noqa: BLE001 - a backend that cannot enumerate just gets the old behaviour
             log.write("display: konnte die Modi nicht lesen (%s)" % error)
             modes = []
-        width, height, refresh = choose_capture_mode(modes, stream_width, stream_height, fps)
+        chooser = choose_sixty_hz_mode if strategy == "sixty" else choose_capture_mode
+        width, height, refresh = chooser(modes, stream_width, stream_height, fps)
         # only say it once per target: a repeated PLAY comes through here again, and the old wording
         # promised a switch even when the desktop was already sitting on the chosen mode
         announce = modes and self._last_announced != (stream_width, stream_height, width, height)

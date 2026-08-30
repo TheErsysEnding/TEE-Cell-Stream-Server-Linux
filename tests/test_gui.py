@@ -120,6 +120,7 @@ class MockServer:
         self.stream_size = (1280, 720)
         self.swap_mouse_sticks = False
         self.switch_display_mode = True
+        self.display_strategy = "capture"
         self.start_calls = 0
         self.start_result = True
         self.shutdown_calls = 0
@@ -344,7 +345,7 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual("NVIDIA GPU (NVENC)", window.encoder_model.get_string(0))
                 self.assertEqual(0, window.encoder_row.get_selected())
                 self.assertEqual(0, window.recovery_row.get_selected())
-                self.assertTrue(window.display_row.get_active())
+                self.assertEqual(1, window.display_row.get_selected())   # "capture", the default
                 self.assertFalse(window.swap_sticks_row.get_active())
                 self.assertIsNotNone(window.view_stack.get_child_by_name("server"))
                 self.assertIsNotNone(window.view_stack.get_child_by_name("commands"))
@@ -406,8 +407,10 @@ class MainWindowTest(unittest.TestCase):
                 self.assertIs(mock.available_encoders[1], mock.chosen_encoder)
                 window.recovery_row.set_selected(1)
                 self.assertEqual("keyframe", mock.loss_recovery)
-                window.display_row.set_active(False)
-                self.assertFalse(mock.switch_display_mode)
+                window.display_row.set_selected(0)                        # "off"
+                self.assertEqual("off", mock.display_strategy)
+                window.display_row.set_selected(2)                        # "sixty": the 60 Hz experiment
+                self.assertEqual("sixty", mock.display_strategy)
                 window.swap_sticks_row.set_active(True)
                 self.assertTrue(mock.swap_mouse_sticks)
                 # Befehle: the kind saves at once, the text after a short pause

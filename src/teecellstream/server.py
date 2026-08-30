@@ -21,6 +21,7 @@ from .audio import AudioStreamer
 from .childproc import kill_all
 from .clock import now_us
 from .desktop_input import DesktopInput
+from . import display_mode
 from .display_mode import DisplayMode
 from .live_streamer import LiveStreamer
 from .pad_receiver import PadReceiver
@@ -304,11 +305,30 @@ class Server:
 
     @property
     def switch_display_mode(self) -> bool:
-        return bool(settings.get("switch_display_mode", True))
+        """Kept as a boolean because everything outside this class only ever asks "does it switch at all"."""
+        return self.display_strategy != "off"
 
     @switch_display_mode.setter
     def switch_display_mode(self, on: bool) -> None:
-        settings.set("switch_display_mode", bool(on))
+        self.display_strategy = "capture" if on else "off"
+
+    @property
+    def display_strategy(self) -> str:
+        """"off", "capture" (the measured default: most refresh the compositor can use) or "sixty" (desktop
+        at 60 Hz, so game, compositor, grid and console all share one clock). See display_mode."""
+        stored = settings.get("display_strategy")
+        if stored in display_mode.DISPLAY_STRATEGIES:
+            return stored
+        # migrate the old boolean: it only ever meant off or the capture-optimised mode
+        return "capture" if bool(settings.get("switch_display_mode", True)) else "off"
+
+    @display_strategy.setter
+    def display_strategy(self, value: str) -> None:
+        if value not in display_mode.DISPLAY_STRATEGIES or value == self.display_strategy:
+            return
+        settings.set("display_strategy", value)
+        settings.set("switch_display_mode", value != "off")   # keep the old key truthful for older builds
+        log.write("display: Umschaltung ab dem nächsten Stream: " + value)
 
     # ------------------------------------------------------------------ the threads
 
@@ -361,8 +381,9 @@ class Server:
                 self.connected_ps3 = sender[0]
                 # the desktop must be at the streaming size BEFORE the capture starts
                 keep_display_awake(True)
-                if self.switch_display_mode and not os.environ.get("TEE_CST_NO_DISPLAY_SWITCH"):
-                    self.display_mode.match_for_capture(*self.stream_size, protocol.FPS)
+                strategy = self.display_strategy
+                if strategy != "off" and not os.environ.get("TEE_CST_NO_DISPLAY_SWITCH"):
+                    self.display_mode.match_for_capture(*self.stream_size, protocol.FPS, strategy)
                 self.live_streamer.start(sender)     # repeat PLAYs are ignored inside
                 self.audio_streamer.start(sender)
         elif text.startswith("PADMODE "):

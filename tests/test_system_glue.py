@@ -877,6 +877,29 @@ class ChooseCaptureModeTests(unittest.TestCase):
         self.assertGreaterEqual(chosen[2], 60 * display_mode.CAPTURE_REFRESH_FACTOR)
 
 
+    def test_sixty_hz_strategy_puts_the_desktop_on_the_streams_own_clock(self):
+        """The point of the "sixty" strategy: no beat. The compositor, our grid and the console all tick
+        at 60, so no picture can be superseded before its slot - which is what 15 % of them were."""
+        for width, height in ((1280, 720), (1536, 864), (1920, 1088)):
+            chosen = display_mode.choose_sixty_hz_mode(self._developer_monitor(), width, height, 60)
+            self.assertAlmostEqual(60.0, chosen[2], places=1, msg="%dx%d" % (width, height))
+            self.assertGreaterEqual(chosen[0], width)
+            self.assertGreaterEqual(chosen[1], height)
+
+    def test_the_two_strategies_really_differ(self):
+        # capture takes the most refresh it can use, sixty takes exactly 60 - on this monitor, of the same size
+        modes = self._developer_monitor()
+        self.assertEqual(240.0, display_mode.choose_capture_mode(modes, 1280, 720, 60)[2])
+        self.assertEqual(60.0, display_mode.choose_sixty_hz_mode(modes, 1280, 720, 60)[2])
+
+    def test_sixty_hz_falls_back_to_the_stream_size_when_no_mode_offers_60(self):
+        modes = [self._mode(2560, 1440, 320.001), self._mode(1920, 1080, 144)]
+        self.assertEqual((1536, 864, 60.0), display_mode.choose_sixty_hz_mode(modes, 1536, 864, 60))
+
+    def test_sixty_hz_ignores_variable_rate_modes(self):
+        modes = [self._mode(1920, 1080, 60, variable=True), self._mode(2560, 1440, 60)]
+        self.assertEqual((2560, 1440, 60.0), display_mode.choose_sixty_hz_mode(modes, 1280, 720, 60))
+
     def test_an_ordinary_desktop_size_is_preferred(self):
         """An exotic mode may not exist on someone else's screen, or may exist and show nothing. The
         stream is scaled from an ordinary size instead - which costs sharpness, never the picture."""

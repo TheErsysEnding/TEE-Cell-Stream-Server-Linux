@@ -15,7 +15,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import APP_EXEC, APP_NAME, UPSTREAM_VERSION, __version__, autostart, custom_commands, log, protocol  # noqa: E402
+from . import APP_EXEC, APP_NAME, UPSTREAM_VERSION, __version__, autostart, custom_commands, display_mode, log, protocol  # noqa: E402
 from .settings import settings  # noqa: E402
 
 REFRESH_TICK_MS = 500
@@ -39,6 +39,11 @@ SIZE_HINTS = ("Empfohlen für den Einstieg – gemessen 22 ms Decode auf der PS3
               "Deutlich schärfer, rund 1,4× Decodelast",
               "Rund 2× Decodelast – ein guter Mittelweg",
               "Volles HD, rund 2,3× Decodelast – gemessen 38–44 ms mit x264")
+
+DISPLAY_LABELS = ("Nicht umschalten", "Für die Aufnahme optimieren", "Auf 60 Hz drosseln")
+DISPLAY_HINTS = ("Der Desktop bleibt, wie er ist – gestreamt wird vom nativen Modus herunterskaliert",
+                 "Standard: höchste Bildwiederholrate, die die Aufnahme nutzen kann – die meisten Bilder",
+                 "Versuch: Monitor auf 60 Hz, damit Spiel, Desktop und Stream denselben Takt haben")
 
 RATE_LABELS = ("Variabel", "Konstante Qualität", "Konstante Bitrate")
 RATE_HINTS = ("Bitrate nur, wenn sich etwas bewegt – die ursprüngliche Einstellung",
@@ -281,9 +286,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.rate_row.connect("notify::selected", self._on_rate_selected)
         group.add(self.rate_row)
 
-        self.display_row = Adw.SwitchRow(title="Desktop während des Streams an die Streamgröße anpassen",
-                                         subtitle="Nach dem Stream wird die alte Auflösung wiederhergestellt")
-        self.display_row.connect("notify::active", self._on_display_toggled)
+        self.display_row = Adw.ComboRow(title="Desktop während des Streams",
+                                        model=Gtk.StringList.new(list(DISPLAY_LABELS)))
+        self.display_row.connect("notify::selected", self._on_display_selected)
         group.add(self.display_row)
         return group
 
@@ -470,7 +475,8 @@ class MainWindow(Adw.ApplicationWindow):
         because GTK ellipsises a long selected value at any window size - the sentence goes here, where
         it always fits."""
         for row, hints in ((self.size_row, SIZE_HINTS), (self.coder_row, ENTROPY_HINTS),
-                           (self.rate_row, RATE_HINTS), (self.recovery_row, LOSS_RECOVERY_HINTS)):
+                           (self.rate_row, RATE_HINTS), (self.recovery_row, LOSS_RECOVERY_HINTS),
+                           (self.display_row, DISPLAY_HINTS)):
             index = row.get_selected()
             if 0 <= index < len(hints) and row.get_subtitle() != hints[index]:
                 row.set_subtitle(hints[index])
@@ -539,9 +545,12 @@ class MainWindow(Adw.ApplicationWindow):
                 "Wenn du das hier lesen kannst, ist alles in Ordnung. Ohne Antwort wird in %d Sekunden "
                 "automatisch auf die vorherige Auflösung zurückgeschaltet." % seconds)
 
-    def _on_display_toggled(self, row, _pspec) -> None:
-        if not self._syncing:
-            self._server.switch_display_mode = row.get_active()
+    def _on_display_selected(self, row, _pspec) -> None:
+        if self._syncing:
+            return
+        index = row.get_selected()
+        if 0 <= index < len(display_mode.DISPLAY_STRATEGIES):
+            self._server.display_strategy = display_mode.DISPLAY_STRATEGIES[index]
 
     def _on_swap_sticks_toggled(self, row, _pspec) -> None:
         if not self._syncing:
@@ -748,8 +757,11 @@ class MainWindow(Adw.ApplicationWindow):
 
             self._sync_hints()
 
-            if self.display_row.get_active() != bool(server.switch_display_mode):
-                self.display_row.set_active(bool(server.switch_display_mode))
+            strategy = getattr(server, "display_strategy", "capture")
+            index = (display_mode.DISPLAY_STRATEGIES.index(strategy)
+                     if strategy in display_mode.DISPLAY_STRATEGIES else 1)
+            if self.display_row.get_selected() != index:
+                self.display_row.set_selected(index)
             if self.swap_sticks_row.get_active() != bool(server.swap_mouse_sticks):
                 self.swap_sticks_row.set_active(bool(server.swap_mouse_sticks))
         finally:
