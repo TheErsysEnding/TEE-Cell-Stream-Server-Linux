@@ -20,6 +20,7 @@ import time
 
 from . import log, protocol
 from .clock import now_us
+from .i18n import _
 
 try:
     from .childproc import popen as _child_popen   # PR_SET_PDEATHSIG: ffmpeg dies with us, never orphaned
@@ -162,16 +163,16 @@ class AudioCapture:
                 reason = self._try_source(source, START_TIMEOUT_S if index == 0 else FALLBACK_TIMEOUT_S)
             except OSError as error:
                 # no ffmpeg at all (or not executable): no source will do any better, so don't try them
-                log.write("audio: ffmpeg lässt sich nicht starten, streame nur Video (%s)" % error)
+                log.write(_("audio: ffmpeg will not start, streaming video only (%s)") % error)
                 return False
             if reason is None:
                 self.source = source
-                log.write("audio: nehme die Lautsprecher auf: %dHz, %d Kanäle, 16-bit (pulse %s)" % (self.sample_rate, CHANNELS, source))
+                log.write(_("audio: capturing the speakers: %dHz, %d channels, 16-bit (pulse %s)") % (self.sample_rate, CHANNELS, source))
                 return True
             reasons.append("%s: %s" % (source, reason))
             if index + 1 < len(sources):
-                log.write("audio: %s startet nicht (%s), versuche %s" % (source, reason, sources[index + 1]))
-        log.write("audio: konnte die Lautsprecher nicht öffnen, streame nur Video (%s)" % "; ".join(reasons))
+                log.write(_("audio: %s does not start (%s), trying %s") % (source, reason, sources[index + 1]))
+        log.write(_("audio: could not open the speakers, streaming video only (%s)") % "; ".join(reasons))
         return False
 
     def _sources_to_try(self) -> list[str]:
@@ -184,8 +185,8 @@ class AudioCapture:
         listed = list_pulse_sources(self.ffmpeg_path)
         monitors = [name for name in listed if name.endswith(MONITOR_SUFFIX)]
         if listed and not monitors:
-            log.write("audio: keine Monitor-Quelle vorhanden (kein Wiedergabegerät), streame nur Video "
-                      "(pulse bietet nur %s)" % ", ".join(listed[:4]))
+            log.write("audio: no monitor source present (no playback device), streaming video only "
+                      "(pulse offers only %s)" % ", ".join(listed[:4]))
             return []
         # the magic names first (they follow the default sink); then every monitor by name, in case the
         # default sink is the one that is broken
@@ -240,8 +241,8 @@ class AudioCapture:
         if drain is not None:
             drain.join(STOP_TIMEOUT_S)   # the process is gone, so its last words are in the pipe: collect them for the log
         if exited_early:
-            return "ffmpeg beendet mit %s%s" % (process.returncode, self._stderr_reason())
-        return "keine Daten innerhalb %.1fs%s" % (timeout, self._stderr_reason())
+            return "ffmpeg exited with %s%s" % (process.returncode, self._stderr_reason())
+        return "no data within %.1fs%s" % (timeout, self._stderr_reason())
 
     def _stderr_reason(self) -> str:
         # ffmpeg prefixes every line with "[in#0 @ 0x55...] " - noise in the window's log
@@ -279,7 +280,7 @@ class AudioCapture:
                     # a capture that had begun and died mid-stream is news; one that never delivered is
                     # reported by start() as the reason it moved on to the next source
                     if self._capturing and self._process is process and self._first_data.is_set():
-                        log.write("audio: Aufnahme abgebrochen (ffmpeg weg%s)" % self._stderr_reason())
+                        log.write(_("audio: capture aborted (ffmpeg gone%s)") % self._stderr_reason())
                     break
                 if self._process is not process:
                     break   # a probe that was given up on, or a stop: these bytes belong to a dead session
@@ -287,7 +288,7 @@ class AudioCapture:
                 self._write(chunk)
                 self._first_data.set()
         except Exception as error:   # noqa: BLE001 - a thread must never die silently
-            log.write("audio: Aufnahme-Thread gestorben: %s" % error)
+            log.write(_("audio: the capture thread died: %s") % error)
         finally:
             try:
                 stream.close()
@@ -340,7 +341,7 @@ class AudioCapture:
         if say:
             # outside the lock on purpose: log.write goes to a file and may rotate it, and the sender waits
             # on this lock every 5ms
-            log.write("audio: Puffer über %dms, verwerfe Ältestes bis %dms (Latenzschutz)" % (GUARD_HIGH_MS, GUARD_LOW_MS))
+            log.write(_("audio: buffer over %dms, dropping the oldest down to %dms (latency guard)") % (GUARD_HIGH_MS, GUARD_LOW_MS))
 
     def read_frames(self, frames: int) -> tuple[bytes, int]:
         """Takes up to `frames` stereo frames out of the ring, padded with silence; also how many were real."""
@@ -391,7 +392,7 @@ class AudioStreamer:
             if not self.capture.start():
                 return   # no speakers to capture (reason is logged): video still streams
         except Exception as error:   # noqa: BLE001 - audio is optional, never take the video down with it
-            log.write("audio: Aufnahme-Start fehlgeschlagen, streame nur Video (%s)" % error)
+            log.write(_("audio: capture failed to start, streaming video only (%s)") % error)
             return
         self._streaming = True
         self._target = target
@@ -400,7 +401,7 @@ class AudioStreamer:
         try:
             thread.start()
         except RuntimeError as error:   # out of threads: without this the ffmpeg would run on with no sender
-            log.write("audio: Sende-Thread startet nicht, streame nur Video (%s)" % error)
+            log.write(_("audio: the sending thread will not start, streaming video only (%s)") % error)
             self._streaming = False
             self._send_thread = None
             self._target = None
@@ -418,7 +419,7 @@ class AudioStreamer:
         try:
             self._send_loop(target)
         except Exception as error:   # noqa: BLE001
-            log.write("audio: Sende-Thread gestorben: %s" % error)
+            log.write(_("audio: the sending thread died: %s") % error)
         finally:
             # ended on our own (send error): say so, or the PS3's next PLAY from the same port would be taken
             # for a repeat of this session and audio would stay dead for as long as it keeps streaming video.
@@ -448,9 +449,9 @@ class AudioStreamer:
         try:
             self.sock.sendto(info, target)
         except OSError as error:
-            log.write("audio: Senden abgebrochen: %s" % error)
+            log.write(_("audio: sending aborted: %s") % error)
             return
-        log.write("audio: streame %dHz Stereo an %s:%d (%dkbps)" % (sample_rate, target[0], target[1], sample_rate * 32 // 1000))
+        log.write(_("audio: streaming %dHz stereo to %s:%d (%dkbps)") % (sample_rate, target[0], target[1], sample_rate * 32 // 1000))
 
         # build a small cushion before playing so the 10ms delivery fragments don't gap the sound. but give
         # up waiting quickly: should the source ever go quiet (WASAPI did, during silence) a session would
@@ -490,5 +491,5 @@ class AudioStreamer:
                     self.sock.sendto(info, target)
                 packet_id += 1
         except OSError as error:
-            log.write("audio: Senden abgebrochen: %s" % error)
-        log.write("audio: %d Pakete gesendet (%d ohne Ton-Daten, %d Frames verworfen)" % (packet_id, silent_packets, capture.dropped_frames))
+            log.write(_("audio: sending aborted: %s") % error)
+        log.write(_("audio: %d packets sent (%d with no audio data, %d frames dropped)") % (packet_id, silent_packets, capture.dropped_frames))

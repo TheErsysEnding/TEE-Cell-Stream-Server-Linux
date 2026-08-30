@@ -1,3 +1,22 @@
+tee-cell-stream-server (1.22.0) unstable; urgency=medium
+
+  * Das Programm ist jetzt standardmaessig auf Englisch. Unter System ->
+    Sprache laesst es sich auf Deutsch umstellen und zurueck, und die
+    Umstellung ist sofort sichtbar - ohne Neustart. Englisch ist dabei die
+    Quellsprache: die Zeichenketten im Code SIND der englische Text, eine
+    fehlende Uebersetzung faellt also auf Englisch zurueck statt auf einen
+    Schluessel.
+  * Log-Zeilen werden beim Schreiben uebersetzt. Bereits geschriebene Zeilen
+    behalten ihre Sprache - ein Log ist ein Protokoll und keine Ansicht, die
+    man neu zeichnen kann.
+  * .desktop-Eintrag, GNOME-Erweiterung und die Meldungen des Installers sind
+    ebenfalls auf Englisch, mit deutscher Variante wo das Format sie kennt.
+  * Neue Tests pruefen den Uebersetzungskatalog gegen den Quelltext: gleiche
+    Format-Platzhalter auf beiden Seiten, kein Schluessel ohne Fundstelle, und
+    keine deutsche Zeichenkette ausserhalb der Tabellen.
+
+ -- TEE <github@teebug.de>  Sun, 30 Aug 2026 15:15:00 +0200
+
 tee-cell-stream-server (1.21.1) unstable; urgency=medium
 
   * Mit gesetztem TEE_CST_TRACE schreibt die Aufnahme jede Sekunde eine

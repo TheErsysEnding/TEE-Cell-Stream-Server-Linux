@@ -213,8 +213,8 @@ class FragmentHeaderTest(unittest.TestCase):
         send_access_unit(FakeSocket(), self.target, 14, too_big, True, now_us(), 10_000_000_000)
         send_access_unit(FakeSocket(), self.target, 15, too_big, True, now_us(), 10_000_000_000)
         self.assertEqual(sent, [])
-        self.assertEqual(log.get_recent().count("überschreitet das PS3-Limit"), 1)
-        self.assertIn("live: Frame 14 mit %d Bytes" % len(too_big), log.get_recent())
+        self.assertEqual(log.get_recent().count("exceeds the PS3 limit"), 1)
+        self.assertIn("live: frame 14 at %d bytes" % len(too_big), log.get_recent())
         # ... while the largest frame the PS3 accepts still goes out whole, and passes its checks fragment by fragment
         largest = memoryview(bytes(PS3_FRAME_MAX_ACCEPTED_BYTES))
         send_access_unit(FakeSocket(), self.target, 16, largest, False, now_us(), 10_000_000_000)
@@ -409,22 +409,22 @@ class AnnexBSplitterSyntheticTest(unittest.TestCase):
 
     def test_slice_report_counts_what_actually_went_out(self):
         splitter = AnnexBSplitter()
-        self.assertIn("keine Bilder", splitter.slice_report())
+        self.assertIn("no pictures", splitter.slice_report())
         stream = (nal(5, body(1, 30)) + nal(5, body(2, 30), first_mb=99)
                   + nal(6, body(3, 4), ref_idc=0)
                   + nal(1, body(4, 20), ref_idc=2) + nal(1, body(5, 20), ref_idc=2, first_mb=99)
                   + nal(6, body(6, 4), ref_idc=0) + nal(1, body(7, 20), ref_idc=2))
         split_with(splitter, [stream])
         report = splitter.slice_report()
-        self.assertIn("3 Bilder", report)
-        self.assertIn("2 Slices (2x)", report)
-        self.assertIn("1 Slices (1x)", report)
+        self.assertIn("3 pictures sent", report)
+        self.assertIn("2 slices (2x)", report)
+        self.assertIn("1 slices (1x)", report)
 
     def test_one_slice_per_picture_is_reported_as_one(self):
         splitter = AnnexBSplitter()
         split_with(splitter, [SYNTHETIC_STREAM])
-        self.assertIn("4 Bilder", splitter.slice_report())
-        self.assertIn("1 Slices (4x)", splitter.slice_report())
+        self.assertIn("4 pictures sent", splitter.slice_report())
+        self.assertIn("1 slices (4x)", splitter.slice_report())
 
     def test_filler_is_dropped_and_never_joins_a_unit(self):
         """Filler data (NAL 12) pads a constant-rate stream and carries no picture. Sending it would turn a

@@ -16,6 +16,7 @@ import threading
 
 from . import log
 from .settings import settings
+from .i18n import _
 
 SLOT_COUNT = 4
 KIND_NONE = "none"
@@ -81,7 +82,7 @@ def _save_all(slots: list[dict]) -> None:
     try:
         settings.set(SETTINGS_KEY, [dict(slot) for slot in slots])
     except Exception as error:   # noqa: BLE001 - the settings file being unwritable must not break the slot
-        log.write("custom: konnte nicht speichern - %s" % error)
+        log.write(_("custom: could not save - %s") % error)
 
 
 def _slots_loaded() -> list[dict]:
@@ -141,11 +142,11 @@ def run(slot: int) -> None:
     """Runs the action bound to a slot (CUSTOM <slot> from the PS3)."""
     command = get(slot)
     if command is None or command["kind"] != KIND_RUN or not command["value"].strip():
-        log.write("custom %d: an diesem Slot hängt nichts" % slot)
+        log.write(_("custom %d: nothing is bound to this slot") % slot)
         return
     value = command["value"].strip()
     try:
         _spawn(command_line(value))
-        log.write("custom %d: gestartet: %s" % (slot, value))
+        log.write(_("custom %d: started: %s") % (slot, value))
     except Exception as error:   # noqa: BLE001 - a missing xdg-open or sh is the user's news, not a crash
-        log.write("custom %d: konnte %s nicht starten - %s" % (slot, value, error))
+        log.write(_("custom %d: could not start %s - %s") % (slot, value, error))

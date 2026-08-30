@@ -26,6 +26,7 @@ import sys
 import threading
 
 from . import log
+from .i18n import _
 
 PR_SET_PDEATHSIG = 1
 SPAWN_TIMEOUT_S = 10.0       # a fork never takes this long; only hit if the spawner is wedged during shutdown
@@ -106,7 +107,7 @@ class _Spawner:
                 request.abandoned = request.process is None and request.error is None
                 give_up = request.abandoned
             if give_up:
-                log.write("childproc: Spawner antwortet nicht, starte direkt")
+                log.write(_("childproc: the spawner does not answer, starting directly"))
                 return subprocess.Popen(args, **kw)
         if request.error is not None:
             raise request.error

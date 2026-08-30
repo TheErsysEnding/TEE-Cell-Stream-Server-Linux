@@ -11,10 +11,10 @@ def main(argv: list[str]) -> int:
         from .server import Server
         server = Server()
         if not server.start():
-            print("Eine andere Kopie des Servers läuft bereits.", file=sys.stderr)
+            print("Another copy of the server is already running.", file=sys.stderr)
             return 1
         server.install_exit_hooks()
-        print("TEE Cell Stream Server läuft (headless). Log: " + log.LOG_PATH, file=sys.stderr)
+        print("TEE Cell Stream Server is running (headless). Log: " + log.LOG_PATH, file=sys.stderr)
         try:
             while True:
                 time.sleep(3600)

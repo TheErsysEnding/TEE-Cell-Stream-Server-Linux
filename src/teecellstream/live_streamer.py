@@ -19,6 +19,7 @@ import time
 from . import childproc, encoders, log, protocol
 from .clock import now_us
 from .stream_sender import AnnexBSplitter, send_access_unit
+from .i18n import _
 
 FIRST_FRAME_TIMEOUT_S = 5.0
 ENCODER_EXIT_WAIT_S = 3.0             # terminate, then this long, then kill
@@ -200,7 +201,7 @@ class LiveStreamer:
             for _ in range(3):
                 self._sock.sendto(info, target)
         except OSError as error:
-            log.write("live: SINFO an %s fehlgeschlagen: %s" % (target[0], error))
+            log.write(_("live: SINFO to %s failed: %s") % (target[0], error))
 
     # ending ffmpeg is what unblocks the pump's read; the pump then does the orderly cleanup itself (capture,
     # pipes, reaping). waiting for it matters: the next stream's capture must not find the old one still busy.
@@ -231,7 +232,7 @@ class LiveStreamer:
     # what counts as a failed start (deviation from the original, which counted every session that ended
     # without a frame - a STOP included): only an attempt that genuinely came to nothing while nobody had
     # asked us to stop. on Linux the portal's share dialog can outlast the watchdog's 10 s grace, and three
-    # such STOPs would have tripped the fuse with the misleading "kein Encoder startet". but a rung that
+    # such STOPs would have tripped the fuse with the misleading "no encoder starts". but a rung that
     # produced no frames before the STOP landed is still counted, or a ladder that takes longer to fail than
     # the grace (5 s first-frame timeout per rung) would never trip it and the desktop would flap forever.
     def _run_pump(self, session: _Session) -> None:
@@ -257,18 +258,18 @@ class LiveStreamer:
             session.active = False
             if any_encoder_worked:
                 self._failed_starts = 0
-                log.write("live: Stream an %s:%d beendet" % session.target)
+                log.write(_("live: stream to %s:%d ended") % session.target)
                 return
             if not (encoder_failed or capture_failed):
                 return   # stopped before anything could fail (the share dialog was still up)
 
             self._failed_starts += 1
             if self._failed_starts >= FAILED_STARTS_BEFORE_GIVING_UP:
-                what = "die Bildschirmaufnahme startet nicht" if capture_failed else "kein Encoder startet"
+                what = "the screen capture does not start" if capture_failed else "no encoder starts"
                 self._on_all_encoders_failed("%s, %d-mal in Folge" % (what, self._failed_starts))
         except Exception as error:   # noqa: BLE001 - a pump that dies must still leave the flags right
             session.active = False
-            log.write("live: Pumpe abgebrochen: %r" % (error,))
+            log.write(_("live: the pump aborted: %r") % (error,))
             # nobody else will: an ffmpeg or a capture left behind here would hold the screen share (and
             # gst-launch) until the server exits
             process, session.process = session.process, None
@@ -286,19 +287,19 @@ class LiveStreamer:
         try:
             capture = self._create_capture()
         except Exception as error:   # noqa: BLE001
-            log.write("live: Bildschirmaufnahme nicht möglich: %s" % error)
+            log.write(_("live: screen capture not possible: %s") % error)
             return None
         if capture is None:
-            log.write("live: keine Bildschirmaufnahme möglich (kein Portal, kein DISPLAY)")
+            log.write(_("live: no screen capture possible (no portal, no DISPLAY)"))
             return None
         session.capture = capture
         try:
             started = capture.start(session.width, session.height, self._fps)
         except Exception as error:   # noqa: BLE001
-            log.write("live: Bildschirmaufnahme (%s) abgebrochen: %s" % (capture.name, error))
+            log.write(_("live: screen capture (%s) aborted: %s") % (capture.name, error))
             started = False
         if not started:
-            log.write("live: Bildschirmaufnahme (%s) startet nicht" % capture.name)
+            log.write(_("live: screen capture (%s) does not start") % capture.name)
             _stop_capture(capture)
             session.capture = None
             return None
@@ -317,7 +318,7 @@ class LiveStreamer:
                                               self._current_slice_count())
             process = _spawn_ffmpeg(args, raw_pipe)
         except (OSError, ValueError) as error:
-            log.write("live: ffmpeg startet nicht: %s" % error)
+            log.write(_("live: ffmpeg does not start: %s") % error)
             _stop_capture(capture)
             session.capture = None
             return False
@@ -355,7 +356,7 @@ class LiveStreamer:
                 capture.feed(process.stdin)
             except Exception as error:   # noqa: BLE001
                 if session.active:
-                    log.write("live: Bildquelle abgebrochen: %s" % error)
+                    log.write(_("live: the picture source aborted: %s") % error)
             finally:
                 if process.stdin is not None:
                     try:
@@ -407,12 +408,11 @@ class LiveStreamer:
                 except OSError as error:
                     if not send_error_logged:
                         send_error_logged = True
-                        log.write("live: Senden an %s fehlgeschlagen: %s" % (session.target[0], error))
+                        log.write(_("live: sending to %s failed: %s") % (session.target[0], error))
                 frame_id += 1
                 if frame_id == 1:
                     first_frame_seen.set()
-                    log.write("live: erstes Frame %d ms nach Encoder-Start gesendet"
-                              % int((time.monotonic() - first_frame_timer) * 1000))
+                    log.write(_("live: first frame sent %d ms after the encoder started") % int((time.monotonic() - first_frame_timer) * 1000))
 
         # what actually went out, per picture - the ground truth for a slice experiment (and a free check
         # that a normal stream really is one slice per picture)
@@ -437,16 +437,15 @@ class LiveStreamer:
         session.capture = None
 
         if frame_id == 0:
-            log.write("live: Encoder lieferte keine Frames. ffmpeg sagte:\n" + error_tail["text"].strip())
+            log.write("live: the encoder produced no frames. ffmpeg said:\n" + error_tail["text"].strip())
             return False
         # An encoder that died mid-stream used to leave nothing behind but the feeder's "broken pipe":
         # the reason was drained into error_tail and then thrown away, because only the zero-frame case
         # printed it. A session that ends because ffmpeg quit is exactly when that text is wanted.
         # session.active is still true here when the pump is leaving on its own rather than being stopped.
         if session.active and died_on_its_own and error_tail["text"].strip():
-            log.write("live: ffmpeg hat sich nach %d Frames beendet. Es sagte:\n%s"
-                      % (frame_id, error_tail["text"].strip()))
-        log.write("live: %d Frames gesendet" % frame_id)
+            log.write(_("live: ffmpeg exited after %d frames. It said:\n%s") % (frame_id, error_tail["text"].strip()))
+        log.write(_("live: %d frames sent") % frame_id)
         return True
 
 
@@ -493,4 +492,4 @@ def _stop_capture(capture) -> None:
     try:
         capture.stop()
     except Exception as error:   # noqa: BLE001 - a capture that will not stop must not stop the cleanup
-        log.write("live: Bildschirmaufnahme (%s) ließ sich nicht beenden: %s" % (getattr(capture, "name", "?"), error))
+        log.write(_("live: screen capture (%s) would not stop: %s") % (getattr(capture, "name", "?"), error))

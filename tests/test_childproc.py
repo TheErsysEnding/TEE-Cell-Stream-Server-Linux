@@ -147,7 +147,7 @@ class ChildProcTests(unittest.TestCase):
         self.addCleanup(lambda: (process.poll() is None and process.kill(), process.wait(timeout=5)))
 
         self.assertIn(process, childproc.children())
-        self.assertIn("childproc: Spawner antwortet nicht, starte direkt", log.get_recent())
+        self.assertIn("childproc: the spawner does not answer, starting directly", log.get_recent())
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             pids = _pids_of(["sleep", "37.3"])

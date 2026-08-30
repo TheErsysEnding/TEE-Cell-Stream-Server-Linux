@@ -25,10 +25,12 @@ except (ValueError, ImportError):   # older PyGObject: the same function under i
     _signal_add = GLib.unix_signal_add
 
 from . import APP_EXEC, APP_ID, APP_NAME, log, tray, ui  # noqa: E402
+from .i18n import _, available_languages, set_language  # noqa: E402
+from .settings import settings  # noqa: E402
 
 MINIMIZED_OPTION = "minimized"
 MONITOR_TICK_MS = 500
-ALREADY_RUNNING_TEXT = "Eine andere Kopie des Servers läuft bereits."
+ALREADY_RUNNING_TEXT = "Another copy of the server is already running."
 
 
 def _create_real_server():
@@ -42,6 +44,10 @@ class CellStreamApplication(Adw.Application):
     def __init__(self, server_factory=None, application_id: str = APP_ID,
                  extra_flags: Gio.ApplicationFlags = Gio.ApplicationFlags.DEFAULT_FLAGS):
         super().__init__(application_id=application_id, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE | extra_flags)
+        # the saved language before anything is built: English is the default, so a fresh install is English
+        saved = settings.get("language", "en")
+        if saved in available_languages():
+            set_language(saved)
         self._server_factory = server_factory or _create_real_server
         self.server = None
         self.window: ui.MainWindow | None = None
@@ -55,7 +61,7 @@ class CellStreamApplication(Adw.Application):
         self._was_armed = True          # the server starts armed; a fuse tripping at start-up must still be reported
         self._tooltip = ""
         self.add_main_option(MINIMIZED_OPTION, 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
-                             "Ohne Fenster starten (nur das Tray-Symbol)", None)
+                             "Start without a window (tray icon only)", None)
         self.connect("startup", self._on_startup)
         self.connect("command-line", self._on_command_line)
         self.connect("shutdown", self._on_shutdown)
@@ -89,7 +95,7 @@ class CellStreamApplication(Adw.Application):
             if not minimized:
                 self.present_window()
         elif not minimized:
-            log.write("eine zweite Kopie wurde gestartet - zeige das Fenster der laufenden")
+            log.write(_("a second copy was started - showing the running one's window"))
             self.present_window()   # a second copy was started: show the running one instead
         return 0
 
@@ -111,18 +117,18 @@ class CellStreamApplication(Adw.Application):
 
     def _show_already_running(self) -> None:
         if hasattr(Adw, "MessageDialog"):
-            dialog = Adw.MessageDialog(heading="Läuft schon", body=ALREADY_RUNNING_TEXT, application=self)
+            dialog = Adw.MessageDialog(heading=_("Already running"), body=_(ALREADY_RUNNING_TEXT), application=self)
             dialog.add_response("ok", "OK")
             dialog.connect("response", lambda *_: self.quit())
             dialog.present()
         else:   # libadwaita without MessageDialog: the dialog that replaced it
-            dialog = Adw.AlertDialog(heading="Läuft schon", body=ALREADY_RUNNING_TEXT)
+            dialog = Adw.AlertDialog(heading=_("Already running"), body=_(ALREADY_RUNNING_TEXT))
             dialog.add_response("ok", "OK")
             dialog.connect("closed", lambda *_: self.quit())
             dialog.present(None)
 
     def _on_unix_signal(self, signum: int) -> bool:
-        log.write("Signal %d - beende" % signum)
+        log.write(_("signal %d - shutting down") % signum)
         self.quit_everything()
         return GLib.SOURCE_CONTINUE   # keep the handler: a second signal during the shutdown must not kill us mid-restore
 
@@ -153,19 +159,19 @@ class CellStreamApplication(Adw.Application):
             try:
                 self.window.shut_down()
             except Exception as error:   # noqa: BLE001
-                log.write("Fenster: konnte nicht sauber schließen: %s" % error)
+                log.write(_("window: could not close cleanly: %s") % error)
         # each step on its own: the icon failing to go must not keep the desktop at the streaming resolution
         if self.tray is not None:
             try:
                 self.tray.stop()
             except Exception as error:   # noqa: BLE001
-                log.write("tray: konnte das Symbol nicht entfernen: %s" % error)
+                log.write(_("tray: could not remove the icon: %s") % error)
         if self.server is not None:
             atexit.unregister(self.server.shutdown)   # done here, so it is not run again (uncaught) at exit
             try:
                 self.server.shutdown()
             except Exception as error:   # noqa: BLE001
-                log.write("Beenden: der Server ließ sich nicht sauber stoppen: %s" % error)
+                log.write(_("quit: the server would not stop cleanly: %s") % error)
 
     # ------------------------------------------------------------------ what the tray and the menu ask for
 
@@ -186,7 +192,7 @@ class CellStreamApplication(Adw.Application):
         try:
             self._monitor()
         except Exception as error:   # noqa: BLE001 - never let a notification hiccup stop the monitoring
-            log.write("Fenster: Überwachung fehlgeschlagen: %s" % error)
+            log.write(_("window: monitoring failed: %s") % error)
         return GLib.SOURCE_CONTINUE
 
     def _monitor(self) -> None:
@@ -199,14 +205,14 @@ class CellStreamApplication(Adw.Application):
             self._was_connected = connected
             if self.tray is not None:
                 self.tray.set_live(connected)
-            self._notify("ps3", "PS3 verbunden" if connected else "PS3 getrennt",
-                         who + " streamt." if connected else "Warte, bis sie wiederkommt.")
+            self._notify("ps3", _("PS3 connected") if connected else _("PS3 disconnected"),
+                         who + _(" is streaming.") if connected else _("Waiting for it to come back."))
 
         # the fuse can trip while the window is hidden, so say so where it will be seen
         if bool(server.is_armed) != self._was_armed:
             self._was_armed = bool(server.is_armed)
             if not self._was_armed and server.trip_reason:
-                self._notify("fuse", "Streaming gestoppt", server.trip_reason)
+                self._notify("fuse", _("Streaming stopped"), server.trip_reason)
 
         tooltip = APP_NAME + " – " + status
         if tooltip != self._tooltip:
@@ -252,7 +258,7 @@ def install_crash_log() -> None:
 
 def _log_crash(where: str, kind, value) -> None:
     try:
-        log.write("abgestürzt%s: %s: %s" % (where, getattr(kind, "__name__", kind), value))
+        log.write(_("crashed%s: %s: %s") % (where, getattr(kind, "__name__", kind), value))
     except Exception:   # noqa: BLE001 - the crash hook itself must never raise
         pass
 

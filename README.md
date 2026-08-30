@@ -38,7 +38,7 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.21.1_all.deb
+sudo apt install ./tee-cell-stream-server_1.22.0_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
@@ -59,6 +59,10 @@ While streaming, every button goes to the PC, so the PS3 app uses SELECT as its 
 | SELECT + Square | presentation mode: vsync off → vsync → vsync + one-frame buffer |
 | SELECT + R3 | show/hide the stats panel |
 | SELECT + Triangle/Circle/L1/R1 | custom commands 1–4 |
+
+**Language.** The window is English by default. *System → Language* switches it to German and back, and it
+changes over immediately — no restart. Log lines are translated as they are written, so lines already in
+the log keep the language they were written in; a log is a record, not a view.
 
 ## Resolutions
 

@@ -19,6 +19,7 @@ import time
 from . import log
 from .clock import now_us
 from .protocol import PAD_PACKET_BYTES, describe_buttons
+from .i18n import _
 
 REPORT_INTERVAL_MS = 2000
 _CP_FIELDS = struct.Struct(">IHbbbbQ")   # after the 'CP' tag: packetId, buttons, leftX, leftY, rightX, rightY, sentUs
@@ -53,11 +54,11 @@ class PadReceiver:
                 return
             if wanted and not self._gamepad.try_open():
                 self._gamepad_unavailable = True   # the PS3 asks once a second; do not keep trying
-                log.write("pad: kein virtuelles Gamepad verfügbar. Bleibe bei Maus und Tastatur.")
+                log.write(_("pad: no virtual gamepad available. Staying on mouse and keyboard."))
                 return
             self._release_locked()   # let go of whatever the device we are leaving was holding down
             self.gamepad_mode = wanted
-            log.write("pad: steuert jetzt " + ("ein virtuelles Xbox-Gamepad" if wanted else "Maus und Tastatur"))
+            log.write(_("pad: now driving ") + (_("a virtual Xbox gamepad") if wanted else _("mouse and keyboard")))
 
     # a key typed on the PS3's on-screen keyboard, replayed on the PC keyboard
     def type_key(self, character: str) -> None:
@@ -117,9 +118,9 @@ class PadReceiver:
             pressed = describe_buttons(buttons & ~self._last_buttons)
             released = describe_buttons(self._last_buttons & ~buttons)
             if pressed:
-                log.write("pad: gedrückt " + pressed)
+                log.write("pad: pressed " + pressed)
             if released:
-                log.write("pad: losgelassen " + released)
+                log.write(_("pad: released ") + released)
             self._last_buttons = buttons
 
         if (time.monotonic() - self._report_started) * 1000 >= self.report_interval_ms:
@@ -131,8 +132,7 @@ class PadReceiver:
             self._interval_packets = 0
             if state != self._last_reported_state or self.packets_lost > 0:
                 self._last_reported_state = state
-                log.write("pad: %s, %d Pakete, %d verloren, %d ms PS3 -> hier"
-                          % (state, self.packets_received, self.packets_lost, trip_ms))
+                log.write(_("pad: %s, %d packets, %d lost, %d ms PS3 -> here") % (state, self.packets_received, self.packets_lost, trip_ms))
 
     def close(self) -> None:
         """Shutdown: release everything and destroy the virtual devices. Later packets are ignored."""
@@ -150,4 +150,4 @@ class PadReceiver:
     def _log_fault(self, error: BaseException) -> None:
         if not self._fault_logged:
             self._fault_logged = True    # once; at 60 packets a second a repeat would flood the log
-            log.write("pad: Fehler bei der Eingabe-Weitergabe: %r" % (error,))
+            log.write(_("pad: error forwarding input: %r") % (error,))

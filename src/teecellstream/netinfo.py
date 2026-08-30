@@ -11,6 +11,7 @@ import shutil
 import subprocess
 
 from . import log, protocol
+from .i18n import _
 
 GLOBAL_BROADCAST = "255.255.255.255"
 IP_ARGUMENTS = ["-j", "-4", "addr", "show", "up"]
@@ -85,6 +86,6 @@ def get_beacon_targets() -> list[tuple[str, int]]:
     except (OSError, subprocess.SubprocessError, RuntimeError) as error:
         if not _failure_reported:
             _failure_reported = True
-            log.write("beacon: `ip addr` fehlgeschlagen (%s), sende nur an %s" % (error, GLOBAL_BROADCAST))
+            log.write(_("beacon: `ip addr` failed (%s), announcing only to %s") % (error, GLOBAL_BROADCAST))
         return [(GLOBAL_BROADCAST, protocol.BEACON_PORT)]
     return parse_beacon_targets(output)

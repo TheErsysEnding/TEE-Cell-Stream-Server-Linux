@@ -12,9 +12,10 @@ import threading
 from gi.repository import Gio, GLib
 
 from . import log
+from .i18n import _
 
 APP_ID = "tee-cell-stream-server"
-REASON = "Streaming zur PS3"
+REASON = "Streaming to a PS3"
 
 # org.gnome.SessionManager.Inhibit flags: 4 = do not suspend, 8 = do not mark the session idle (screen off)
 INHIBIT_SUSPEND = 4
@@ -57,7 +58,7 @@ def keep_display_awake(streaming: bool) -> None:
             else:
                 _call(SCREENSAVER, "UnInhibit", GLib.Variant("(u)", (cookie,)))
         except GLib.Error as error:
-            log.write("power: Freigabe des Bildschirms fehlgeschlagen (%s)" % _error_text(error))
+            log.write(_("power: releasing the screen failed (%s)") % _error_text(error))
 
 
 def _inhibit() -> tuple[str, int] | None:
@@ -73,8 +74,7 @@ def _inhibit() -> tuple[str, int] | None:
         except GLib.Error as screensaver_error:
             if not _failure_reported:
                 _failure_reported = True
-                log.write("power: kann den Bildschirm nicht wach halten (SessionManager: %s; ScreenSaver: %s)"
-                          % (_error_text(session_error), _error_text(screensaver_error)))
+                log.write(_("power: cannot keep the screen awake (SessionManager: %s; ScreenSaver: %s)") % (_error_text(session_error), _error_text(screensaver_error)))
             return None
 
 

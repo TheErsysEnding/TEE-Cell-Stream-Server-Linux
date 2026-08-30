@@ -53,7 +53,7 @@ class EnsureEnabledTests(unittest.TestCase):
         state = self._run([_info(enabled=False, state=2.0), GLib.Variant("(b)", (True,))])
         self.assertEqual(state, shell_extension.ENABLED)
         self.assertEqual(self._calls, ["GetExtensionInfo", "EnableExtension"])
-        self.assertIn("eingeschaltet", log.get_recent())
+        self.assertIn("extension enabled", log.get_recent())
 
     def test_enabled_flag_without_active_state_is_still_switched_on(self):
         """'enabled' in gsettings but state != ENABLED means it did not load - ask for it again."""
@@ -65,8 +65,8 @@ class EnsureEnabledTests(unittest.TestCase):
         state = self._run([GLib.Variant("(a{sv})", ({},))])
         self.assertEqual(state, shell_extension.NEEDS_LOGOUT)
         recent = log.get_recent()
-        self.assertIn("ab- und anmelden", recent)
-        self.assertIn("randloses Fenster", recent, "der Ausweg für jetzt muss dabeistehen")
+        self.assertIn("log out and in once", recent)
+        self.assertIn("borderless window", recent, "the workaround for now has to be in there")
 
     def test_no_gnome_shell_is_not_an_error(self):
         state = self._run([GLib.Error.new_literal(GLib.quark_from_string("g-dbus-error-quark"),
@@ -76,7 +76,7 @@ class EnsureEnabledTests(unittest.TestCase):
     def test_shell_refuses(self):
         state = self._run([_info(enabled=False, state=2.0), GLib.Variant("(b)", (False,))])
         self.assertEqual(state, shell_extension.FAILED)
-        self.assertIn("abgelehnt", log.get_recent())
+        self.assertIn("refused to enable", log.get_recent())
 
     def test_enable_call_itself_fails(self):
         state = self._run([_info(enabled=False, state=2.0),

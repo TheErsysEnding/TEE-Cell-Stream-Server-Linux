@@ -725,7 +725,7 @@ class PortalRequestPlumbingTests(unittest.TestCase):
             self._session(bus)._request("Start", [], {}, 0.3)
         elapsed = time.monotonic() - started
         self.assertTrue(0.25 <= elapsed < 2.0, "timeout took %.2f s" % elapsed)
-        self.assertIn("keine Antwort", str(caught.exception))
+        self.assertIn("no answer", str(caught.exception))
         closes = [c for c in bus.calls if c[2] == "Close" and c[1] == portal.REQUEST_INTERFACE]
         self.assertEqual(len(closes), 1, "Request.Close must take the dialog down after the timeout")
         self.assertEqual(closes[0][0], bus.subscribed[0])
@@ -1091,16 +1091,16 @@ class PacingTests(unittest.TestCase):
     def test_trace_reports_a_source_over_the_grid_and_the_pictures_it_costs(self):
         traces = self._traced(90)
         self.assertGreaterEqual(len(traces), 2, traces)
-        rates = [int(re.search(r"Quelle (\d+)/s", line).group(1)) for line in traces]
+        rates = [int(re.search(r"source (\d+)/s", line).group(1)) for line in traces]
         self.assertTrue(all(rate > 62 for rate in rates), traces)     # 90/s really is over the band
-        superseded = [int(re.search(r"(\d+) überholt", line).group(1)) for line in traces]
+        superseded = [int(re.search(r"(\d+) superseded", line).group(1)) for line in traces]
         self.assertTrue(any(count > 0 for count in superseded),
                         "a source over the grid must show pictures being superseded: %r" % traces)
 
     def test_trace_reports_a_source_on_the_grid_as_costing_nothing(self):
         traces = self._traced(FPS)
         self.assertGreaterEqual(len(traces), 2, traces)
-        superseded = [int(re.search(r"(\d+) überholt", line).group(1)) for line in traces]
+        superseded = [int(re.search(r"(\d+) superseded", line).group(1)) for line in traces]
         self.assertEqual([], [count for count in superseded if count > 2], traces)
 
     def test_nothing_is_traced_while_the_switch_is_off(self):
@@ -1569,24 +1569,24 @@ class SmoothnessReport(unittest.TestCase):
         return instance.smoothness_report()
 
     def test_an_even_stream_reads_as_fully_in_time(self):
-        self.assertIn("100% im Takt", self._report([16.7] * 100))
-        self.assertIn("0 sichtbare Hänger", self._report([16.7] * 100))
+        self.assertIn("100% on the cadence", self._report([16.7] * 100))
+        self.assertIn("0 visible hitches", self._report([16.7] * 100))
 
     def test_a_beat_between_source_and_grid_reads_as_out_of_time(self):
         # 60 pictures a second leave, but their content alternates 8 ms and 25 ms apart: the count is
         # perfect and the motion is not. Nothing but this measurement can see it.
-        self.assertIn("0% im Takt", self._report([8.0, 25.0] * 50))
+        self.assertIn("0% on the cadence", self._report([8.0, 25.0] * 50))
 
     def test_a_genuinely_slower_source_shows_up_in_the_median(self):
         report = self._report([25.0] * 100)
-        self.assertIn("Median 25.0 ms", report)
-        self.assertIn("0% im Takt", report)
+        self.assertIn("median gap 25.0 ms", report)
+        self.assertIn("0% on the cadence", report)
 
     def test_held_pictures_are_counted_separately(self):
-        self.assertIn("10 sichtbare Hänger", self._report([16.7] * 90 + [33.4] * 10))
+        self.assertIn("10 visible hitches", self._report([16.7] * 90 + [33.4] * 10))
 
     def test_too_few_samples_say_so_instead_of_inventing_a_number(self):
-        self.assertIn("zu wenige", self._report([16.7] * 5))
+        self.assertIn("too few", self._report([16.7] * 5))
 
 
 if __name__ == "__main__":

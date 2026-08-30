@@ -16,50 +16,193 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import APP_EXEC, APP_NAME, UPSTREAM_VERSION, __version__, autostart, custom_commands, display_mode, log, protocol  # noqa: E402
+from .i18n import _, add_translations, language, set_language, on_language_changed, off_language_changed  # noqa: E402
 from .settings import settings  # noqa: E402
 
 REFRESH_TICK_MS = 500
-SLOT_SAVE_DELAY_MS = 400       # typing in a Befehle field: save once the fingers pause, not per keystroke
+SLOT_SAVE_DELAY_MS = 400       # typing in a command field: save once the fingers pause, not per keystroke
 WINDOW_WIDTH = 640
 WINDOW_HEIGHT = 600
 NARROW_BREAKPOINT = "max-width: 500sp"
 
-BITRATE_LABELS = tuple("%d Mbit/s%s" % (k // 1000, " (empfohlen)" if k == 12000 else "")
-                       for k in protocol.BITRATE_CHOICES_KBPS)
+# The German half of this window. English is what stands in the code above and below; a string missing from
+# here simply stays English, which is the point of keeping English as the source language.
+LANGUAGE_LABELS = ("English", "Deutsch")
+LANGUAGE_CODES = ("en", "de")
+
+add_translations({
+    " (recommended)": " (empfohlen)",
+    "The PS3 decodes CAVLC about 43 % faster – measured 22 ms instead of 36–40 ms at 720p":
+        "Die PS3 decodiert CAVLC rund 43 % schneller – gemessen 22 ms statt 36–40 ms bei 720p",
+    "CABAC is slightly sharper per bit, but costs the PS3 considerably more decode time":
+        "CABAC ist etwas schärfer pro Bit, kostet die PS3 aber deutlich mehr Decodezeit",
+    "A good place to start – measured 22 ms decode on the PS3":
+        "Empfohlen für den Einstieg – gemessen 22 ms Decode auf der PS3",
+    "A little sharper, about 1.2× the decode load": "Etwas schärfer, rund 1,2× Decodelast",
+    "Noticeably sharper, about 1.4× the decode load": "Deutlich schärfer, rund 1,4× Decodelast",
+    "About 2× the decode load – a good middle ground": "Rund 2× Decodelast – ein guter Mittelweg",
+    "Full HD, about 2.3× the decode load – measured 38–44 ms with x264":
+        "Volles HD, rund 2,3× Decodelast – gemessen 38–44 ms mit x264",
+    "Leave it alone": "Nicht umschalten",
+    "Optimise for capture": "Für die Aufnahme optimieren",
+    "Throttle to 60 Hz": "Auf 60 Hz drosseln",
+    "The desktop stays as it is – the stream is scaled down from its native mode":
+        "Der Desktop bleibt, wie er ist – gestreamt wird vom nativen Modus herunterskaliert",
+    "Default: the highest refresh rate the capture can use – the most pictures":
+        "Standard: höchste Bildwiederholrate, die die Aufnahme nutzen kann – die meisten Bilder",
+    "Experiment: monitor at 60 Hz, so game, desktop and stream share one cadence":
+        "Versuch: Monitor auf 60 Hz, damit Spiel, Desktop und Stream denselben Takt haben",
+    "1 (default)": "1 (Standard)",
+    "One picture in one piece – how everything so far was measured":
+        "Ein Bild am Stück – so wurde alles bisher gemessen",
+    "Experiment: two strips per picture. x264 only. Costs a little bitrate, as nothing is predicted across the edge":
+        "Versuch: zwei Streifen je Bild. Nur x264. Kostet etwas Bitrate, weil über die Kante nicht vorhergesagt wird",
+    "Experiment: four strips per picture – as many as the decoder has SPUs. x264 only":
+        "Versuch: vier Streifen je Bild – so viele, wie der Decoder SPUs hat. Nur x264",
+    "Variable": "Variabel",
+    "Constant quality": "Konstante Qualität",
+    "Constant bitrate": "Konstante Bitrate",
+    "Bitrate only when something moves – the original setting":
+        "Bitrate nur, wenn sich etwas bewegt – die ursprüngliche Einstellung",
+    "Default: measured the lowest latency (29 ms), and text stays sharp on an idle desktop":
+        "Standard: gemessen die niedrigste Latenz (29 ms), und Text bleibt auch im Leerlauf scharf",
+    "Holds the rate exactly and pads with filler when it has to, which the server throws away again":
+        "Hält die Rate genau und füllt notfalls mit Leerdaten auf, die der Server wieder wegwirft",
+    "Default: repairs the picture continuously, with no bitrate spikes":
+        "Standard: repariert das Bild laufend, ohne Bitratenspitzen",
+    "Whole keyframes once a second – in case NVENC accumulates artefacts over time":
+        "Ganze Schlüsselbilder im Sekundentakt – falls NVENC über die Zeit Artefakte zeigt",
+    "None": "Keine",
+    "Run a command or URI": "Befehl oder URI ausführen",
+    " – above the cadence, pictures are being discarded": " – über dem Takt, Bilder werden verworfen",
+    " – below the cadence, pictures are being held": " – unter dem Takt, Bilder werden gehalten",
+    " – on the cadence": " – im Takt",
+    " · source %d/s%s": " · Quelle %d/s%s",
+    "Stopped": "Gestoppt",
+    "Waiting for a PS3 …": "Warte auf eine PS3 …",
+    "PS3 connected: ": "PS3 verbunden: ",
+    "Closing the window leaves the server running in the background. Quit from the tray icon or the menu.":
+        "Schließen des Fensters lässt den Server im Hintergrund weiterlaufen. "
+        "Beenden über das Tray-Symbol oder das Menü.",
+    "On the PS3, SELECT + Triangle / Circle / L1 / R1 fires commands 1 to 4. It only sends the "
+    "number – what happens is set here: a URI such as steam://open/bigpicture (xdg-open) "
+    "or a command line (sh -c). So a device on the network can never start anything you have not "
+    "entered here.":
+        "Die PS3 löst mit SELECT + Dreieck / Kreis / L1 / R1 die Befehle 1 bis 4 aus. Sie schickt nur die "
+        "Nummer – was dann passiert, legst du hier fest: eine URI wie steam://open/bigpicture (xdg-open) "
+        "oder eine Befehlszeile (sh -c). Ein Gerät im Netz kann also nie etwas starten, das du nicht "
+        "hier eingetragen hast.",
+    "Log opened": "Log geöffnet",
+    "could not open the log: %s / %s": "konnte das Log nicht öffnen: %s / %s",
+    "Main menu": "Hauptmenü",
+    "Open the log": "Log öffnen",
+    "Autostart": "Autostart",
+    "Quit": "Beenden",
+    "About ": "Über ",
+    "Server": "Server",
+    "Commands": "Befehle",
+    "Video": "Video",
+    "Input": "Eingabe",
+    "System": "System",
+    "Log": "Protokoll",
+    "Encoder": "Encoder",
+    "Error correction": "Fehlerkorrektur",
+    "Resolution": "Auflösung",
+    _("Bitrate"): _("Bitrate"),
+    _("Entropy coder"): "Entropie-Codierung",
+    _("Rate control"): "Ratensteuerung",
+    "Slices per picture (experiment)": "Slices je Bild (Versuch)",
+    "The desktop while streaming": "Desktop während des Streams",
+    "Language": "Sprache",
+    "The interface switches over at once – no restart": "Die Oberfläche schaltet sofort um – kein Neustart",
+    "Stop": "Stopp",
+    "Start": "Start",
+    "Locked while a PS3 is streaming": "Gesperrt, solange eine PS3 streamt",
+    "No H.264 encoder found": "Kein H.264-Encoder gefunden",
+    "How the stream gets back to a clean picture after packet loss":
+        "Wie der Stream nach Paketverlust wieder ein sauberes Bild bekommt",
+    "Bigger means more readable text, but costs the PS3 roughly proportionally more decode time":
+        "Größer heißt lesbarer Text, kostet die PS3 aber ungefähr proportional mehr Decodezeit",
+    "Lower it when the picture judders on the PS3 – raise it only while it stays fluid":
+        "Niedriger, wenn das Bild auf der PS3 ruckelt – höher nur, solange es flüssig bleibt",
+    "The PS3 decodes CAVLC about 43 % faster – CABAC only while the picture stays fluid":
+        "Die PS3 decodiert CAVLC rund 43 % schneller – CABAC nur, solange das Bild flüssig bleibt",
+    "What the encoder spends its bitrate on – only the x264 encoder can do all three":
+        "Wofür der Encoder seine Bitrate ausgibt – nur der x264-Encoder kann alle drei",
+    "Swap the sticks in mouse mode": "Sticks im Maus-Modus tauschen",
+    "The right stick moves the pointer": "Rechter Stick bewegt den Zeiger",
+    "Start at login (minimised)": "Beim Anmelden starten (minimiert)",
+    "Creates an autostart entry": "Legt einen Autostart-Eintrag an",
+    "Ctrl+L": "Strg+L",
+    "stopped by you": "von dir gestoppt",
+    "encoders: end the stream first, then change the encoder":
+        "encoders: erst den Stream beenden, dann den Encoder wechseln",
+    "video: end the stream first, then change the error correction":
+        "video: erst den Stream beenden, dann die Fehlerkorrektur wechseln",
+    "video: end the stream first, then change the bitrate":
+        "video: erst den Stream beenden, dann die Bitrate wechseln",
+    "video: end the stream first, then change the resolution":
+        "video: erst den Stream beenden, dann die Auflösung wechseln",
+    "video: end the stream first, then change the entropy coder":
+        "video: erst den Stream beenden, dann die Entropie-Codierung wechseln",
+    "video: end the stream first, then change the rate control":
+        "video: erst den Stream beenden, dann die Ratensteuerung wechseln",
+    "video: end the stream first, then change the slice count":
+        "video: erst den Stream beenden, dann die Slice-Zahl wechseln",
+    "No, switch back": "Nein, zurückschalten",
+    "display: picture confirmed, the new resolution stays":
+        "display: Bild bestätigt, die neue Auflösung bleibt",
+    "The desktop was switched for the stream.\n\nIf you can read this, everything is fine. "
+    "With no answer it switches back to the previous resolution automatically in %d seconds.":
+        "Der Desktop wurde für den Stream umgeschaltet.\n\nWenn du das hier lesen kannst, ist alles in "
+        "Ordnung. Ohne Antwort wird in %d Sekunden automatisch auf die vorherige Auflösung zurückgeschaltet.",
+    "window: could not go to the background: %s": "Fenster: konnte nicht in den Hintergrund gehen: %s",
+    "command %d could not be saved: %s": "Befehl %d konnte nicht gespeichert werden: %s",
+    "Still running in the background": "Läuft im Hintergrund weiter",
+    "The server is still waiting for the PS3. Quit from the tray icon or the menu.":
+        "Der Server wartet weiter auf die PS3. Beenden über das Tray-Symbol oder das Menü.",
+})
+
+
+def bitrate_labels() -> tuple[str, ...]:
+    """Built on demand rather than at import: the word in brackets is translated, so the list has to be
+    rebuilt whenever the language changes."""
+    return tuple("%d Mbit/s%s" % (k // 1000, _(" (recommended)") if k == protocol.KBPS else "")
+                 for k in protocol.BITRATE_CHOICES_KBPS)
 # Short names for the dropdown, full explanations underneath it. GTK truncates a long selected value with
 # an ellipsis at any window size, so the sentence that explains a choice can never live inside the choice:
 # it goes into the row's subtitle, which the row rewrites whenever the selection changes.
 ENTROPY_LABELS = ("CAVLC", "CABAC")
-ENTROPY_HINTS = ("Die PS3 decodiert CAVLC rund 43 % schneller – gemessen 22 ms statt 36–40 ms bei 720p",
-                 "CABAC ist etwas schärfer pro Bit, kostet die PS3 aber deutlich mehr Decodezeit")
+ENTROPY_HINTS = ("The PS3 decodes CAVLC about 43 % faster – measured 22 ms instead of 36–40 ms at 720p",
+                 "CABAC is slightly sharper per bit, but costs the PS3 considerably more decode time")
 
 SIZE_LABELS = ("1280 × 720", "1408 × 800", "1536 × 864", "1792 × 1008", "1920 × 1088")
-SIZE_HINTS = ("Empfohlen für den Einstieg – gemessen 22 ms Decode auf der PS3",
-              "Etwas schärfer, rund 1,2× Decodelast",
-              "Deutlich schärfer, rund 1,4× Decodelast",
-              "Rund 2× Decodelast – ein guter Mittelweg",
-              "Volles HD, rund 2,3× Decodelast – gemessen 38–44 ms mit x264")
+SIZE_HINTS = ("A good place to start – measured 22 ms decode on the PS3",
+              "A little sharper, about 1.2× the decode load",
+              "Noticeably sharper, about 1.4× the decode load",
+              "About 2× the decode load – a good middle ground",
+              "Full HD, about 2.3× the decode load – measured 38–44 ms with x264")
 
-DISPLAY_LABELS = ("Nicht umschalten", "Für die Aufnahme optimieren", "Auf 60 Hz drosseln")
-DISPLAY_HINTS = ("Der Desktop bleibt, wie er ist – gestreamt wird vom nativen Modus herunterskaliert",
-                 "Standard: höchste Bildwiederholrate, die die Aufnahme nutzen kann – die meisten Bilder",
-                 "Versuch: Monitor auf 60 Hz, damit Spiel, Desktop und Stream denselben Takt haben")
+DISPLAY_LABELS = ("Leave it alone", "Optimise for capture", "Throttle to 60 Hz")
+DISPLAY_HINTS = ("The desktop stays as it is – the stream is scaled down from its native mode",
+                 "Default: the highest refresh rate the capture can use – the most pictures",
+                 "Experiment: monitor at 60 Hz, so game, desktop and stream share one cadence")
 
-SLICE_LABELS = ("1 (Standard)", "2", "4")
-SLICE_HINTS = ("Ein Bild am Stück – so wurde alles bisher gemessen",
-               "Versuch: zwei Streifen je Bild. Nur x264. Kostet etwas Bitrate, weil über die Kante nicht vorhergesagt wird",
-               "Versuch: vier Streifen je Bild – so viele, wie der Decoder SPUs hat. Nur x264")
-RATE_LABELS = ("Variabel", "Konstante Qualität", "Konstante Bitrate")
-RATE_HINTS = ("Bitrate nur, wenn sich etwas bewegt – die ursprüngliche Einstellung",
-              "Standard: gemessen die niedrigste Latenz (29 ms), und Text bleibt auch im Leerlauf scharf",
-              "Hält die Rate genau und füllt notfalls mit Leerdaten auf, die der Server wieder wegwirft")
+SLICE_LABELS = ("1 (default)", "2", "4")
+SLICE_HINTS = ("One picture in one piece – how everything so far was measured",
+               "Experiment: two strips per picture. x264 only. Costs a little bitrate, as nothing is predicted across the edge",
+               "Experiment: four strips per picture – as many as the decoder has SPUs. x264 only")
+RATE_LABELS = ("Variable", "Constant quality", "Constant bitrate")
+RATE_HINTS = ("Bitrate only when something moves – the original setting",
+              "Default: measured the lowest latency (29 ms), and text stays sharp on an idle desktop",
+              "Holds the rate exactly and pads with filler when it has to, which the server throws away again")
 
 LOSS_RECOVERY_KINDS = ("intra", "keyframe")
 LOSS_RECOVERY_LABELS = ("Intra-Refresh", "Keyframes")
-LOSS_RECOVERY_HINTS = ("Standard: repariert das Bild laufend, ohne Bitratenspitzen",
-                       "Ganze Schlüsselbilder im Sekundentakt – falls NVENC über die Zeit Artefakte zeigt")
+LOSS_RECOVERY_HINTS = ("Default: repairs the picture continuously, with no bitrate spikes",
+                       "Whole keyframes once a second – in case NVENC accumulates artefacts over time")
 COMMAND_KINDS = ("none", "run")
-COMMAND_KIND_LABELS = ("Keine", "Befehl oder URI ausführen")
+COMMAND_KIND_LABELS = ("None", "Run a command or URI")
 
 # The grid hands the console `fps` pictures a second whatever the desktop does. A source ABOVE that has
 # some of its pictures replaced before their slot, and unevenly - which is exactly what judder is, even
@@ -78,23 +221,23 @@ def source_rate_text(captured_fps: int, fps: int) -> str:
     # edge read as outside it. The servo was measured locking at 62/s and letting go at 63.
     low, high = int(fps * (1 - SOURCE_BAND)), -int(-fps * (1 + SOURCE_BAND) // 1)
     if captured_fps > high:
-        note = " – über dem Takt, Bilder werden verworfen"
+        note = " – above the cadence, pictures are being discarded"
     elif captured_fps < low:
-        note = " – unter dem Takt, Bilder werden gehalten"
+        note = " – below the cadence, pictures are being held"
     else:
-        note = " – im Takt"
-    return " · Quelle %d/s%s" % (captured_fps, note)
+        note = " – on the cadence"
+    return " · source %d/s%s" % (captured_fps, note)
 
 
-STATUS_STOPPED = "Gestoppt"
-STATUS_WAITING = "Warte auf eine PS3 …"
-STATUS_CONNECTED = "PS3 verbunden: "
-HIDE_HINT = ("Schließen des Fensters lässt den Server im Hintergrund weiterlaufen. "
-             "Beenden über das Tray-Symbol oder das Menü.")
-COMMANDS_INTRO = ("Die PS3 löst mit SELECT + Dreieck / Kreis / L1 / R1 die Befehle 1 bis 4 aus. Sie schickt nur die "
-                  "Nummer – was dann passiert, legst du hier fest: eine URI wie steam://open/bigpicture (xdg-open) "
-                  "oder eine Befehlszeile (sh -c). Ein Gerät im Netz kann also nie etwas starten, das du nicht "
-                  "hier eingetragen hast.")
+STATUS_STOPPED = "Stopped"
+STATUS_WAITING = "Waiting for a PS3 …"
+STATUS_CONNECTED = "PS3 connected: "
+HIDE_HINT = ("Closing the window leaves the server running in the background. "
+             "Quit from the tray icon or the menu.")
+COMMANDS_INTRO = ("On the PS3, SELECT + Triangle / Circle / L1 / R1 fires commands 1 to 4. It only sends the "
+                  "number – what happens is set here: a URI such as steam://open/bigpicture (xdg-open) "
+                  "or a command line (sh -c). So a device on the network can never start anything you have not "
+                  "entered here.")
 
 CSS = """
 .status-card { padding: 18px; }
@@ -135,7 +278,7 @@ def install_style() -> None:
 def open_log(parent: Gtk.Window | None = None) -> None:
     """Hands the log file to whatever the desktop opens .log files with."""
     if not os.path.exists(log.LOG_PATH):
-        log.write("Log geöffnet")   # creates the file, so there is something to show
+        log.write(_("Log opened"))   # creates the file, so there is something to show
     try:
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(log.LOG_PATH))
         launcher.launch(parent, None, _on_log_launched)
@@ -155,14 +298,14 @@ def _open_log_fallback(reason: str) -> None:
         subprocess.Popen(["xdg-open", log.LOG_PATH], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError as error:
-        log.write("konnte das Log nicht öffnen: %s / %s" % (reason, error))
+        log.write(_("could not open the log: %s / %s") % (reason, error))
 
 
 def status_text(armed: bool, connected: bool, who: str) -> str:
     """The one line the window's status card and the tray's tooltip both show - defined once so they cannot drift."""
     if not armed:
-        return STATUS_STOPPED
-    return STATUS_CONNECTED + who if connected else STATUS_WAITING
+        return _(STATUS_STOPPED)
+    return _(STATUS_CONNECTED) + who if connected else _(STATUS_WAITING)
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -184,6 +327,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
         self.connect("destroy", self._on_destroy)
         self._timer_id = GLib.timeout_add(REFRESH_TICK_MS, self._on_tick)
+        on_language_changed(self._apply_language)   # the switch relabels this window in place
         # a mode switch asks the user whether they can still see anything; without a window to ask in
         # (headless), display_mode simply does not arm the countdown and behaves as it always did
         display = getattr(self._server, "display_mode", None)
@@ -202,13 +346,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._header = Adw.HeaderBar(title_widget=switcher)
         self._window_title = Adw.WindowTitle(title=APP_NAME)
         self._switcher = switcher
-        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", primary=True, tooltip_text="Hauptmenü",
-                                     menu_model=self._build_menu())
-        self._header.pack_end(menu_button)
+        self._menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", primary=True,
+                                           tooltip_text=_("Main menu"), menu_model=self._build_menu())
+        self._header.pack_end(self._menu_button)
         toolbar.add_top_bar(self._header)
 
-        self.view_stack.add_titled_with_icon(self._build_server_page(), "server", "Server", "video-display-symbolic")
-        self.view_stack.add_titled_with_icon(self._build_commands_page(), "commands", "Befehle", "utilities-terminal-symbolic")
+        self.view_stack.add_titled_with_icon(self._build_server_page(), "server", _("Server"), "video-display-symbolic")
+        self.view_stack.add_titled_with_icon(self._build_commands_page(), "commands", _("Commands"), "utilities-terminal-symbolic")
         toolbar.set_content(self.view_stack)
 
         # narrow window: the switcher moves from the header to a bar along the bottom
@@ -230,12 +374,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _build_menu(self) -> Gio.Menu:
         menu = Gio.Menu()
         section = Gio.Menu()
-        section.append("Log öffnen", "win.open-log")
-        section.append("Autostart", "win.autostart")
+        section.append(_("Open the log"), "win.open-log")
+        section.append(_("Autostart"), "win.autostart")
         menu.append_section(None, section)
         section = Gio.Menu()
-        section.append("Über " + APP_NAME, "win.about")
-        section.append("Beenden", "app.quit")
+        section.append(_("About ") + APP_NAME, "win.about")
+        section.append(_("Quit"), "app.quit")
         menu.append_section(None, section)
         return menu
 
@@ -265,90 +409,96 @@ class MainWindow(Adw.ApplicationWindow):
         card.append(self.status_dot)
 
         texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True, valign=Gtk.Align.CENTER)
-        self.status_label = Gtk.Label(label=STATUS_WAITING, xalign=0, wrap=True, css_classes=["title-2"])
+        self.status_label = Gtk.Label(label=_(STATUS_WAITING), xalign=0, wrap=True, css_classes=["title-2"])
         self.subtitle_label = Gtk.Label(label="", xalign=0, wrap=True, css_classes=["dim-label"])
         texts.append(self.status_label)
         texts.append(self.subtitle_label)
         card.append(texts)
 
-        self.start_stop_button = Gtk.Button(label="Stop", valign=Gtk.Align.CENTER, css_classes=["pill", "destructive-action"])
+        self.start_stop_button = Gtk.Button(label=_("Stop"), valign=Gtk.Align.CENTER, css_classes=["pill", "destructive-action"])
         self.start_stop_button.connect("clicked", self._on_start_stop_clicked)
         card.append(self.start_stop_button)
         return card
 
     def _build_video_group(self) -> Gtk.Widget:
-        group = Adw.PreferencesGroup(title="Video")
+        group = Adw.PreferencesGroup(title=_("Video"))
         self.encoder_model = Gtk.StringList()
-        self.encoder_row = Adw.ComboRow(title="Encoder", subtitle="Gesperrt, solange eine PS3 streamt", model=self.encoder_model)
+        self.encoder_row = Adw.ComboRow(title=_("Encoder"), subtitle=_("Locked while a PS3 is streaming"), model=self.encoder_model)
         self.encoder_row.connect("notify::selected", self._on_encoder_selected)
         group.add(self.encoder_row)
 
-        self.recovery_row = Adw.ComboRow(title="Fehlerkorrektur", subtitle="Wie der Stream nach Paketverlust wieder ein sauberes Bild bekommt",
-                                         model=Gtk.StringList.new(list(LOSS_RECOVERY_LABELS)))
+        self.recovery_row = Adw.ComboRow(title=_("Error correction"), subtitle=_("How the stream gets back to a clean picture after packet loss"),
+                                         model=Gtk.StringList.new([_(text) for text in LOSS_RECOVERY_LABELS]))
         self.recovery_row.connect("notify::selected", self._on_recovery_selected)
         group.add(self.recovery_row)
 
         # The PS3's decoder, not the network, is the wall: measured 38-40 ms per frame at 11-13 Mbit/s CABAC
         # against the 16.7 ms a 60 fps frame gets, so the console dropped every other one. These two rows are
         # what buy that time back.
-        self.size_row = Adw.ComboRow(title="Auflösung",
-                                    subtitle="Größer heißt lesbarer Text, kostet die PS3 aber ungefähr proportional mehr Decodezeit",
-                                    model=Gtk.StringList.new(list(SIZE_LABELS)))
+        self.size_row = Adw.ComboRow(title=_("Resolution"),
+                                    subtitle=_("Bigger means more readable text, but costs the PS3 roughly proportionally more decode time"),
+                                    model=Gtk.StringList.new([_(text) for text in SIZE_LABELS]))
         self.size_row.connect("notify::selected", self._on_size_selected)
         group.add(self.size_row)
 
-        self.bitrate_row = Adw.ComboRow(title="Bitrate",
-                                        subtitle="Niedriger, wenn das Bild auf der PS3 ruckelt – höher nur, solange es flüssig bleibt",
-                                        model=Gtk.StringList.new(list(BITRATE_LABELS)))
+        self.bitrate_row = Adw.ComboRow(title=_("Bitrate"),
+                                        subtitle=_("Lower it when the picture judders on the PS3 – raise it only while it stays fluid"),
+                                        model=Gtk.StringList.new(list(bitrate_labels())))
         self.bitrate_row.connect("notify::selected", self._on_bitrate_selected)
         group.add(self.bitrate_row)
 
         self.coder_row = Adw.ComboRow(title="Entropie-Codierung",
-                                      subtitle="Die PS3 decodiert CAVLC rund 43 % schneller – CABAC nur, solange das Bild flüssig bleibt",
-                                      model=Gtk.StringList.new(list(ENTROPY_LABELS)))
+                                      subtitle=_("The PS3 decodes CAVLC about 43 % faster – CABAC only while the picture stays fluid"),
+                                      model=Gtk.StringList.new([_(text) for text in ENTROPY_LABELS]))
         self.coder_row.connect("notify::selected", self._on_coder_selected)
         group.add(self.coder_row)
 
         self.rate_row = Adw.ComboRow(title="Ratensteuerung",
-                                     subtitle="Wofür der Encoder seine Bitrate ausgibt – nur der x264-Encoder kann alle drei",
-                                     model=Gtk.StringList.new(list(RATE_LABELS)))
+                                     subtitle=_("What the encoder spends its bitrate on – only the x264 encoder can do all three"),
+                                     model=Gtk.StringList.new([_(text) for text in RATE_LABELS]))
         self.rate_row.connect("notify::selected", self._on_rate_selected)
         group.add(self.rate_row)
 
-        self.slice_row = Adw.ComboRow(title="Slices je Bild (Versuch)",
-                                      model=Gtk.StringList.new(list(SLICE_LABELS)))
+        self.slice_row = Adw.ComboRow(title=_("Slices per picture (experiment)"),
+                                      model=Gtk.StringList.new([_(text) for text in SLICE_LABELS]))
         self.slice_row.connect("notify::selected", self._on_slice_selected)
         group.add(self.slice_row)
 
-        self.display_row = Adw.ComboRow(title="Desktop während des Streams",
-                                        model=Gtk.StringList.new(list(DISPLAY_LABELS)))
+        self.display_row = Adw.ComboRow(title=_("The desktop while streaming"),
+                                        model=Gtk.StringList.new([_(text) for text in DISPLAY_LABELS]))
         self.display_row.connect("notify::selected", self._on_display_selected)
         group.add(self.display_row)
         return group
 
     def _build_input_group(self) -> Gtk.Widget:
-        group = Adw.PreferencesGroup(title="Eingabe")
-        self.swap_sticks_row = Adw.SwitchRow(title="Sticks im Maus-Modus tauschen", subtitle="Rechter Stick bewegt den Zeiger")
+        group = Adw.PreferencesGroup(title=_("Input"))
+        self.swap_sticks_row = Adw.SwitchRow(title=_("Swap the sticks in mouse mode"), subtitle=_("The right stick moves the pointer"))
         self.swap_sticks_row.connect("notify::active", self._on_swap_sticks_toggled)
         group.add(self.swap_sticks_row)
         return group
 
     def _build_system_group(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        group = Adw.PreferencesGroup(title="System")
-        self.autostart_row = Adw.SwitchRow(title="Beim Anmelden starten (minimiert)", subtitle="Legt einen Autostart-Eintrag an")
+        group = Adw.PreferencesGroup(title=_("System"))
+        self.language_row = Adw.ComboRow(title=_("Language"),
+                                         subtitle=_("The interface switches over at once – no restart"),
+                                         model=Gtk.StringList.new(list(LANGUAGE_LABELS)))
+        self.language_row.set_selected(LANGUAGE_CODES.index(language()) if language() in LANGUAGE_CODES else 0)
+        self.language_row.connect("notify::selected", self._on_language_selected)
+        group.add(self.language_row)
+        self.autostart_row = Adw.SwitchRow(title=_("Start at login (minimised)"), subtitle=_("Creates an autostart entry"))
         self.autostart_row.connect("notify::active", self._on_autostart_row_toggled)
         group.add(self.autostart_row)
         box.append(group)
-        hint = Gtk.Label(label=HIDE_HINT, xalign=0, wrap=True, css_classes=["dim-label", "caption"])
+        hint = Gtk.Label(label=_(HIDE_HINT), xalign=0, wrap=True, css_classes=["dim-label", "caption"])
         box.append(hint)
         return box
 
     def _build_log_pane(self) -> Gtk.Widget:
         pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["log-pane"])
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=18, margin_end=10, margin_top=6, margin_bottom=4)
-        header.append(Gtk.Label(label="Protokoll", xalign=0, hexpand=True, css_classes=["heading"]))
-        open_button = Gtk.Button(label="Log öffnen", css_classes=["flat"], action_name="win.open-log", tooltip_text="Strg+L")
+        header.append(Gtk.Label(label=_("Log"), xalign=0, hexpand=True, css_classes=["heading"]))
+        open_button = Gtk.Button(label=_("Open the log"), css_classes=["flat"], action_name="win.open-log", tooltip_text=_("Ctrl+L"))
         header.append(open_button)
         pane.append(header)
 
@@ -367,18 +517,18 @@ class MainWindow(Adw.ApplicationWindow):
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         clamp.set_child(column)
         scroller.set_child(clamp)
-        column.append(Gtk.Label(label=COMMANDS_INTRO, xalign=0, wrap=True, css_classes=["dim-label"]))
+        column.append(Gtk.Label(label=_(COMMANDS_INTRO), xalign=0, wrap=True, css_classes=["dim-label"]))
 
         self.slot_rows: list[tuple[Adw.ComboRow, Adw.EntryRow, Adw.EntryRow]] = []
         for slot in range(1, custom_commands.SLOT_COUNT + 1):
             command = custom_commands.get(slot) or {}
-            group = Adw.PreferencesGroup(title="Befehl %d" % slot)
-            kind_row = Adw.ComboRow(title="Aktion", model=Gtk.StringList.new(list(COMMAND_KIND_LABELS)))
+            group = Adw.PreferencesGroup(title=_("Command %d") % slot)
+            kind_row = Adw.ComboRow(title=_("Action"), model=Gtk.StringList.new([_(text) for text in COMMAND_KIND_LABELS]))
             kind = command.get("kind", "none")
             kind_row.set_selected(COMMAND_KINDS.index(kind) if kind in COMMAND_KINDS else 0)
-            value_row = Adw.EntryRow(title="Befehl oder URI", text=command.get("value", "") or "")
-            label_row = Adw.EntryRow(title="Name", text=command.get("label", "") or "")
-            value_row.set_sensitive(kind == "run")   # only Run needs a command; Keine leaves the field disabled
+            value_row = Adw.EntryRow(title=_("Command or URI"), text=command.get("value", "") or "")
+            label_row = Adw.EntryRow(title=_("Name"), text=command.get("label", "") or "")
+            value_row.set_sensitive(kind == "run")   # only Run needs a command; None leaves the field disabled
             kind_row.connect("notify::selected", self._on_slot_kind_changed, slot)
             value_row.connect("changed", self._on_slot_text_changed, slot)
             label_row.connect("changed", self._on_slot_text_changed, slot)
@@ -421,8 +571,8 @@ class MainWindow(Adw.ApplicationWindow):
     def show_about(self) -> Adw.AboutDialog:
         about = Adw.AboutDialog(application_name=APP_NAME, application_icon=APP_EXEC, version=__version__,
                                 developer_name="TEE", license_type=Gtk.License.APACHE_2_0, copyright="© 2026 TEE",
-                                comments=("Streamt den PC-Desktop zu einer PS3 mit der cell-stream-App und spielt "
-                                          "deren Controller am PC ab.\n\nLinux-Port von cell-stream-server "
+                                comments=("Streams the PC desktop to a PS3 running the cell-stream app and plays "
+                                          "its controller back on the PC.\n\nLinux port of cell-stream-server "
                                           "(ps3-dev, Release %s)." % UPSTREAM_VERSION))
         about.present(self)
         return about
@@ -431,7 +581,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_start_stop_clicked(self, _button) -> None:
         if self._server.is_armed:
-            self._server.disarm("von dir gestoppt")
+            self._server.disarm("stopped by you")
         else:
             self._server.arm()
         self.refresh()
@@ -449,7 +599,7 @@ class MainWindow(Adw.ApplicationWindow):
         if chosen is self._server.chosen_encoder:
             return
         if self._server.is_ps3_connected:
-            log.write("encoders: erst den Stream beenden, dann den Encoder wechseln")
+            log.write(_("encoders: end the stream first, then change the encoder"))
             self._sync_choices()
             return
         self._server.chosen_encoder = chosen
@@ -461,7 +611,7 @@ class MainWindow(Adw.ApplicationWindow):
         if index < 0 or index >= len(LOSS_RECOVERY_KINDS) or LOSS_RECOVERY_KINDS[index] == self._server.loss_recovery:
             return
         if self._server.is_ps3_connected:
-            log.write("video: erst den Stream beenden, dann die Fehlerkorrektur wechseln")
+            log.write(_("video: end the stream first, then change the error correction"))
             self._sync_choices()
             return
         self._server.loss_recovery = LOSS_RECOVERY_KINDS[index]
@@ -475,7 +625,7 @@ class MainWindow(Adw.ApplicationWindow):
         if protocol.BITRATE_CHOICES_KBPS[index] == self._server.video_kbps:
             return
         if self._server.is_ps3_connected:
-            log.write("video: erst den Stream beenden, dann die Bitrate wechseln")
+            log.write(_("video: end the stream first, then change the bitrate"))
             self._sync_choices()
             return
         self._server.video_kbps = protocol.BITRATE_CHOICES_KBPS[index]
@@ -487,7 +637,7 @@ class MainWindow(Adw.ApplicationWindow):
         if index < 0 or index >= len(protocol.STREAM_SIZES) or protocol.STREAM_SIZES[index] == self._server.stream_size:
             return
         if self._server.is_ps3_connected:
-            log.write("video: erst den Stream beenden, dann die Auflösung wechseln")
+            log.write(_("video: end the stream first, then change the resolution"))
             self._sync_choices()
             return
         self._server.stream_size = protocol.STREAM_SIZES[index]
@@ -499,10 +649,46 @@ class MainWindow(Adw.ApplicationWindow):
         if index < 0 or index >= len(protocol.ENTROPY_CODERS) or protocol.ENTROPY_CODERS[index] == self._server.entropy_coder:
             return
         if self._server.is_ps3_connected:
-            log.write("video: erst den Stream beenden, dann die Entropie-Codierung wechseln")
+            log.write(_("video: end the stream first, then change the entropy coder"))
             self._sync_choices()
             return
         self._server.entropy_coder = protocol.ENTROPY_CODERS[index]
+
+    def _on_language_selected(self, row, _pspec) -> None:
+        if self._syncing:
+            return
+        index = row.get_selected()
+        if not (0 <= index < len(LANGUAGE_CODES)):
+            return
+        settings.set("language", LANGUAGE_CODES[index])
+        set_language(LANGUAGE_CODES[index])     # calls _apply_language through the listener
+
+    def _apply_language(self) -> None:
+        """Relabel the whole window in place. The two pages are thrown away and built again rather than
+        walked widget by widget: every label then comes from the same code that created it in the first
+        place, so a new row cannot be forgotten here later. Everything the pages show is either read back
+        from the server (_sync_choices) or from the settings file, so nothing is lost - except an unsaved
+        keystroke in a command field, which is why the pending saves are flushed first."""
+        for slot, timer in list(self._slot_save_timers.items()):
+            GLib.source_remove(timer)
+            self._slot_save_timers.pop(slot, None)
+            self._on_slot_save_due(slot)
+        visible = self.view_stack.get_visible_child_name() or "server"
+        for name in ("server", "commands"):
+            child = self.view_stack.get_child_by_name(name)
+            if child is not None:
+                self.view_stack.remove(child)
+        self.view_stack.add_titled_with_icon(self._build_server_page(), "server", _("Server"),
+                                             "video-display-symbolic")
+        self.view_stack.add_titled_with_icon(self._build_commands_page(), "commands", _("Commands"),
+                                             "utilities-terminal-symbolic")
+        self.view_stack.set_visible_child_name(visible)
+        self._menu_button.set_menu_model(self._build_menu())
+        self._menu_button.set_tooltip_text(_("Main menu"))
+        self._shown_log_generation = None    # the new log view is empty; force one refresh into it
+        self._sync_choices()
+        self.refresh()
+        self._refresh_log()
 
     def _sync_hints(self) -> None:
         """Each combo row explains its CURRENT choice underneath itself. The dropdown holds short names
@@ -513,8 +699,8 @@ class MainWindow(Adw.ApplicationWindow):
                            (self.slice_row, SLICE_HINTS),
                            (self.display_row, DISPLAY_HINTS)):
             index = row.get_selected()
-            if 0 <= index < len(hints) and row.get_subtitle() != hints[index]:
-                row.set_subtitle(hints[index])
+            if 0 <= index < len(hints) and row.get_subtitle() != _(hints[index]):
+                row.set_subtitle(_(hints[index]))
 
     def _on_rate_selected(self, row, _pspec) -> None:
         if self._syncing:
@@ -523,7 +709,7 @@ class MainWindow(Adw.ApplicationWindow):
         if index < 0 or index >= len(protocol.RATE_CONTROLS) or protocol.RATE_CONTROLS[index] == self._server.rate_control:
             return
         if self._server.is_ps3_connected:
-            log.write("video: erst den Stream beenden, dann die Ratensteuerung wechseln")
+            log.write(_("video: end the stream first, then change the rate control"))
             self._sync_choices()
             return
         self._server.rate_control = protocol.RATE_CONTROLS[index]
@@ -535,7 +721,7 @@ class MainWindow(Adw.ApplicationWindow):
         if index < 0 or index >= len(protocol.SLICE_COUNTS) or protocol.SLICE_COUNTS[index] == self._server.slice_count:
             return
         if self._server.is_ps3_connected:
-            log.write("video: erst den Stream beenden, dann die Slice-Zahl wechseln")
+            log.write(_("video: end the stream first, then change the slice count"))
             self._sync_choices()
             return
         self._server.slice_count = protocol.SLICE_COUNTS[index]
@@ -551,9 +737,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_display_confirm(self, seconds: int):
         display = self._server.display_mode
-        dialog = Adw.AlertDialog(heading="Siehst du dieses Fenster?",
+        dialog = Adw.AlertDialog(heading=_("Can you see this window?"),
                                  body=self._confirm_body(seconds))
-        dialog.add_response("no", "Nein, zurückschalten")
+        dialog.add_response("no", _("No, switch back"))
         dialog.add_response("yes", "Ja, so lassen")
         dialog.set_response_appearance("yes", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_response_appearance("no", Adw.ResponseAppearance.DESTRUCTIVE)
@@ -577,7 +763,7 @@ class MainWindow(Adw.ApplicationWindow):
             left["done"] = True
             if response == "yes":
                 display.confirm_visible()
-                log.write("display: Bild bestätigt, die neue Auflösung bleibt")
+                log.write(_("display: picture confirmed, the new resolution stays"))
             else:
                 display.reject_visible()
 
@@ -588,9 +774,9 @@ class MainWindow(Adw.ApplicationWindow):
 
     @staticmethod
     def _confirm_body(seconds: int) -> str:
-        return ("Der Desktop wurde für den Stream umgeschaltet.\n\n"
-                "Wenn du das hier lesen kannst, ist alles in Ordnung. Ohne Antwort wird in %d Sekunden "
-                "automatisch auf die vorherige Auflösung zurückgeschaltet." % seconds)
+        return _("The desktop was switched for the stream.\n\n"
+                 "If you can read this, everything is fine. With no answer it switches back to the previous "
+                 "resolution automatically in %d seconds.") % seconds
 
     def _on_display_selected(self, row, _pspec) -> None:
         if self._syncing:
@@ -644,7 +830,7 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             self.hide_to_tray()
         except Exception as error:   # noqa: BLE001 - an exception here would return FALSE and destroy the window
-            log.write("Fenster: konnte nicht in den Hintergrund gehen: %s" % error)
+            log.write(_("window: could not go to the background: %s") % error)
             self.set_visible(False)
         return True
 
@@ -659,7 +845,7 @@ class MainWindow(Adw.ApplicationWindow):
             try:
                 self._save_slot(slot)
             except Exception as error:   # noqa: BLE001 - a failed save must not stop the shutdown around it
-                log.write("Befehl %d konnte nicht gespeichert werden: %s" % (slot, error))
+                log.write(_("command %d could not be saved: %s") % (slot, error))
 
     def shut_down(self) -> None:
         """Give back what the window owns, while its widgets are still readable. The app calls this before it
@@ -667,6 +853,10 @@ class MainWindow(Adw.ApplicationWindow):
         connected on a Python subclass of Adw.ApplicationWindow never runs, so the 500 ms timer would keep
         ticking on a destroyed window (3 ticks in 1.5 s after destroy()) for the life of the process."""
         self.flush_pending_saves()
+        # the language listener holds this window by a bound method, so leaving it registered keeps a
+        # destroyed window - and through it the application - alive for ever. It belongs HERE and not in
+        # the destroy handler for the same reason the timer does: that handler never runs.
+        off_language_changed(self._apply_language)
         if self._timer_id:
             GLib.source_remove(self._timer_id)
             self._timer_id = 0
@@ -678,8 +868,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_visible(False)
         if not settings.get("hide_notice_shown", False):
             settings.set("hide_notice_shown", True)
-            self._send_notification("hidden", "Läuft im Hintergrund weiter",
-                                    "Der Server wartet weiter auf die PS3. Beenden über das Tray-Symbol oder das Menü.")
+            self._send_notification("hidden", _("Still running in the background"),
+                                    _("The server is still waiting for the PS3. Quit from the tray icon or the menu."))
 
     def present_from_tray(self, activation_token: str | None = None) -> None:
         # a fresh map gets the focus on its own; a window already on screen is only raised when we hand the
@@ -704,7 +894,7 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             self.refresh()
         except Exception as error:   # noqa: BLE001 - a display glitch must not stop the timer for good
-            log.write("Fenster: Aktualisierung fehlgeschlagen: %s" % error)
+            log.write(_("window: refresh failed: %s") % error)
         return GLib.SOURCE_CONTINUE
 
     def refresh(self) -> None:
@@ -772,7 +962,7 @@ class MainWindow(Adw.ApplicationWindow):
             if kinds != self._encoder_kinds:
                 self._encoder_kinds = kinds
                 self.encoder_model.splice(0, self.encoder_model.get_n_items(), [encoder.name for encoder in encoders])
-                self.encoder_row.set_subtitle("Gesperrt, solange eine PS3 streamt" if encoders else "Kein H.264-Encoder gefunden")
+                self.encoder_row.set_subtitle("Locked while a PS3 is streaming" if encoders else "No H.264 encoder found")
             chosen = server.chosen_encoder
             if chosen is not None and chosen in encoders:
                 index = encoders.index(chosen)
@@ -803,6 +993,10 @@ class MainWindow(Adw.ApplicationWindow):
             index = protocol.RATE_CONTROLS.index(rate) if rate in protocol.RATE_CONTROLS else 0
             if self.rate_row.get_selected() != index:
                 self.rate_row.set_selected(index)
+
+            index = LANGUAGE_CODES.index(language()) if language() in LANGUAGE_CODES else 0
+            if self.language_row.get_selected() != index:
+                self.language_row.set_selected(index)
 
             slices = getattr(server, "slice_count", 1)
             index = protocol.SLICE_COUNTS.index(slices) if slices in protocol.SLICE_COUNTS else 0

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from gi.repository import Gio, GLib
 
 from . import log
+from .i18n import _
 
 MUTTER_BUS_NAME = "org.gnome.Mutter.DisplayConfig"
 MUTTER_OBJECT_PATH = "/org/gnome/Mutter/DisplayConfig"
@@ -315,7 +316,7 @@ def build_config(state: DisplayState, primary: LogicalMonitor, new_mode: Mode, n
     primary_monitor = state.find_monitor(primary.connectors[0]) if primary.connectors else None
     old_mode = primary_monitor.current_mode() if primary_monitor is not None else None
     if old_mode is None:
-        raise DisplayError("kein aktiver Modus auf dem primären Monitor")
+        raise DisplayError("no active mode on the primary monitor")
     old_width, old_height = logical_size(old_mode, primary.scale, primary.is_rotated, state.layout_mode)
     new_width, new_height = logical_size(new_mode, new_scale, primary.is_rotated, state.layout_mode)
     shift_x = old_width - new_width
@@ -447,11 +448,11 @@ class _MutterBackend:
         state = read_current_state(self._bus)
         primary = state.primary_logical_monitor()
         if primary is None:
-            raise DisplayError("kein logischer Monitor")
+            raise DisplayError("no logical monitor")
         monitor = state.find_monitor(primary.connectors[0])
         mode = monitor.current_mode() if monitor is not None else None
         if monitor is None or mode is None:
-            raise DisplayError("primärer Monitor %s hat keinen aktiven Modus" % primary.connectors[0])
+            raise DisplayError("primary monitor %s has no active mode" % primary.connectors[0])
         return _Snapshot(mode.width, mode.height, "%s %s" % (monitor.connector, mode.id),
                          (state, primary, monitor, mode), mode.refresh)
 
@@ -466,7 +467,7 @@ class _MutterBackend:
         state, primary, monitor, current = snapshot.payload
         candidates = rank_modes(monitor.modes, width, height, refresh_hz)
         if not candidates:
-            raise DisplayError("kein Modus %dx%d auf %s" % (width, height, monitor.connector))
+            raise DisplayError("no %dx%d mode on %s" % (width, height, monitor.connector))
         # remembered before applying: if mutter accepts the switch, this is what restore() puts back
         self._original = _MutterOriginal(current_config(state), state.apply_properties(), current.width, current.height,
                                          current.id, primary.scale, monitor.connector)
@@ -486,7 +487,7 @@ class _MutterBackend:
     def restore(self) -> str:
         original = self._original
         if original is None:
-            raise DisplayError("kein gemerkter Modus")
+            raise DisplayError("no remembered mode")
         # the serial we switched with is stale by now; each attempt reads a fresh one. the second attempt covers a
         # MonitorsChanged that lands between our read and our apply.
         last_error: DisplayError | None = None
@@ -580,7 +581,7 @@ class _XrandrBackend:
         screen: XrandrScreen = snapshot.payload
         candidates = [mode for mode in screen.modes if mode[0] == width and mode[1] == height]
         if not candidates:
-            raise DisplayError("kein Modus %dx%d auf %s" % (width, height, screen.output))
+            raise DisplayError("no %dx%d mode on %s" % (width, height, screen.output))
         rate_text = min(candidates, key=lambda mode: (abs(mode[2] - refresh_hz) > REFRESH_TOLERANCE_HZ,
                                                        mode[2] < refresh_hz, abs(mode[2] - refresh_hz)))[3]
         original_rate = next((mode[3] for mode in screen.modes
@@ -596,13 +597,13 @@ class _XrandrBackend:
                 self._run(mode_arguments)
             except DisplayError as without_rate:
                 self._original = None
-                raise DisplayError("%s; ohne Rate: %s" % (with_rate, without_rate)) from None
-            return "%s %dx%d (Rate von xrandr gewählt)" % (screen.output, width, height)
+                raise DisplayError("%s; without a rate: %s" % (with_rate, without_rate)) from None
+            return "%s %dx%d (rate chosen by xrandr)" % (screen.output, width, height)
         return "%s %dx%d@%s" % (screen.output, width, height, rate_text)
 
     def restore(self) -> str:
         if self._original is None:
-            raise DisplayError("kein gemerkter Modus")
+            raise DisplayError("no remembered mode")
         output, width, height, rate_text = self._original
         arguments = ["--output", output, "--mode", "%dx%d" % (width, height)]
         if rate_text:
@@ -615,16 +616,16 @@ class _NullBackend:
     name = "none"
 
     def read(self) -> _Snapshot:
-        raise DisplayError("weder Mutter (DBus) noch X11 erreichbar")
+        raise DisplayError("neither Mutter (DBus) nor X11 reachable")
 
     def capture_modes(self) -> list:
         return []
 
     def switch(self, snapshot, width, height, refresh_hz) -> str:
-        raise DisplayError("keine Anzeige-Steuerung")
+        raise DisplayError("no display control")
 
     def restore(self) -> str:
-        raise DisplayError("keine Anzeige-Steuerung")
+        raise DisplayError("no display control")
 
 
 def wayland_session() -> bool:
@@ -669,7 +670,7 @@ class DisplayMode:
         if self._backend is None:
             self._backend = select_backend()
             if self._backend.name == "none":
-                log.write("display: weder Mutter (DBus) noch X11 gefunden - die Auflösung wird nicht umgeschaltet")
+                log.write(_("display: neither Mutter (DBus) nor X11 found - the resolution will not be switched"))
         return self._backend
 
     def match_for_capture(self, stream_width: int, stream_height: int, fps: int, strategy: str = "capture") -> bool:
@@ -678,7 +679,7 @@ class DisplayMode:
         try:
             modes = self._backend_ready().capture_modes()
         except Exception as error:   # noqa: BLE001 - a backend that cannot enumerate just gets the old behaviour
-            log.write("display: konnte die Modi nicht lesen (%s)" % error)
+            log.write(_("display: could not read the modes (%s)") % error)
             modes = []
         chooser = choose_sixty_hz_mode if strategy == "sixty" else choose_capture_mode
         width, height, refresh = chooser(modes, stream_width, stream_height, fps)
@@ -692,11 +693,10 @@ class DisplayMode:
             if self._changed and not was_changed:
                 pass            # match_to logged the switch itself, with the sizes it really used
             elif switched:
-                log.write("display: streame %dx%d, der Desktop steht schon auf %dx%d@%g - nichts umzuschalten"
-                          % (stream_width, stream_height, width, height, refresh))
+                log.write(_("display: streaming %dx%d, the desktop is already at %dx%d@%g - nothing to switch") % (stream_width, stream_height, width, height, refresh))
             else:
-                log.write("display: streame %dx%d, wollte den Desktop auf %dx%d@%g bringen - ging nicht, "
-                          "es wird stattdessen skaliert" % (stream_width, stream_height, width, height, refresh))
+                log.write("display: streaming %dx%d, wanted the desktop at %dx%d@%g - could not, "
+                          "scaling instead" % (stream_width, stream_height, width, height, refresh))
         if switched:
             self.arm_confirmation()
         return switched
@@ -711,10 +711,10 @@ class DisplayMode:
             try:
                 snapshot = backend.read()
             except DisplayError as error:
-                log.write("display: konnte die aktuelle Auflösung nicht lesen (%s), streame stattdessen skaliert" % error)
+                log.write(_("display: could not read the current resolution (%s), streaming scaled instead") % error)
                 return False
             except Exception as error:   # noqa: BLE001 - a backend bug must degrade to "scaled", never to a crash
-                log.write("display: Fehler beim Lesen der Auflösung (%s), streame stattdessen skaliert" % error)
+                log.write(_("display: error reading the resolution (%s), streaming scaled instead") % error)
                 return False
             # The rate has to be part of this. The "sixty" strategy changes ONLY the rate - same size, 60 Hz
             # instead of 320 - and a size-only test reported "already there" and switched nothing at all.
@@ -727,15 +727,15 @@ class DisplayMode:
             try:
                 detail = backend.switch(snapshot, width, height, refresh_hz)
             except DisplayError as error:
-                log.write("display: %dx%d wurde abgelehnt (%s), streame stattdessen skaliert" % (width, height, error))
+                log.write(_("display: %dx%d was refused (%s), streaming scaled instead") % (width, height, error))
                 return False
             except Exception as error:   # noqa: BLE001
-                log.write("display: %dx%d wurde abgelehnt (%s), streame stattdessen skaliert" % (width, height, error))
+                log.write(_("display: %dx%d was refused (%s), streaming scaled instead") % (width, height, error))
                 return False
 
             self._original_size = (snapshot.width, snapshot.height)
             self._changed = True
-            log.write("display: Desktop auf %dx%d umgeschaltet (war %dx%d; %s); wird nach dem Stream "
+            log.write("display: desktop switched to %dx%d (was %dx%d; %s); it is restored after the "
                       "wiederhergestellt" % (width, height, snapshot.width, snapshot.height, detail))
             return True
 
@@ -765,15 +765,14 @@ class DisplayMode:
         def wait_then_revert():
             if self._confirmed.wait(CONFIRM_SECONDS):
                 return
-            log.write("display: keine Bestätigung nach %d s - schalte auf die alte Auflösung zurück"
-                      % CONFIRM_SECONDS)
+            log.write(_("display: no confirmation after %d s - switching back to the old resolution") % CONFIRM_SECONDS)
             self.restore()
 
         threading.Thread(target=wait_then_revert, name="display-confirm", daemon=True).start()
         try:
             prompt(CONFIRM_SECONDS)
         except Exception as error:   # noqa: BLE001 - a dialog that will not open must not cost the mode
-            log.write("display: Rückfrage ging nicht auf (%s), lasse die Auflösung stehen" % error)
+            log.write(_("display: could not ask (%s), leaving the resolution as it is") % error)
             self._confirmed.set()
 
     def restore(self) -> None:
@@ -786,10 +785,9 @@ class DisplayMode:
             try:
                 detail = self._backend_ready().restore()
             except DisplayError as error:
-                log.write("display: Wiederherstellung von %dx%d fehlgeschlagen (%s) - bitte in den Anzeige-Einstellungen zurückschalten"
-                          % (width, height, error))
+                log.write(_("display: restoring %dx%d failed (%s) - please switch back in the display settings") % (width, height, error))
                 return
             except Exception as error:   # noqa: BLE001
-                log.write("display: Wiederherstellung von %dx%d fehlgeschlagen (%s)" % (width, height, error))
+                log.write(_("display: restoring %dx%d failed (%s)") % (width, height, error))
                 return
-            log.write("display: Desktop wieder auf %s" % detail)
+            log.write(_("display: desktop back at %s") % detail)

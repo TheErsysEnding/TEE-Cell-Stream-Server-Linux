@@ -9,6 +9,7 @@ import shutil
 import sys
 
 from . import APP_EXEC, APP_NAME, log
+from .i18n import _
 
 FILE_NAME = APP_EXEC + ".desktop"
 MINIMIZED_SWITCH = "--minimized"
@@ -44,7 +45,7 @@ def _entry_text() -> str:
         "[Desktop Entry]",
         "Type=Application",
         "Name=" + APP_NAME,
-        "Comment=PC-Desktop zur PS3 streamen (cell-stream)",
+        "Comment=Stream the PC desktop to a PS3 (cell-stream)",
         "Exec=" + exec_line(),
         "Icon=" + APP_EXEC,
         "Terminal=false",
@@ -87,8 +88,8 @@ def set_enabled(wanted: bool) -> bool:
                 os.remove(target)
             except FileNotFoundError:
                 pass
-        log.write("Autostart: startet beim Anmelden (minimiert)" if wanted else "Autostart: startet nicht mehr beim Anmelden")
+        log.write("autostart: starts at login (minimised)" if wanted else "autostart: no longer starts at login")
         return True
     except OSError as error:
-        log.write("Autostart: konnte die Einstellung nicht ändern: %s" % error)
+        log.write(_("autostart: could not change the setting: %s") % error)
         return False

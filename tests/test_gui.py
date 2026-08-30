@@ -111,7 +111,7 @@ class MockServer:
         self.trip_reason = None
         self.is_ps3_connected = False
         self.connected_ps3 = None
-        self.available_encoders = [FakeEncoder("nvenc", "NVIDIA GPU (NVENC)"), FakeEncoder("x264", "CPU (x264 – weniger fps möglich)")]
+        self.available_encoders = [FakeEncoder("nvenc", "NVIDIA GPU (NVENC)"), FakeEncoder("x264", "CPU (x264 – fewer fps possible)")]
         self.chosen_encoder = self.available_encoders[0]
         self.loss_recovery = "intra"
         self.video_kbps = 6000              # the two knobs that decide the PS3's decode cost
@@ -284,7 +284,7 @@ class AutostartTest(unittest.TestCase):
         try:
             self.assertFalse(autostart.set_enabled(True))
             self.assertFalse(autostart.is_enabled())
-            self.assertIn("Autostart: konnte die Einstellung nicht ändern", log.get_recent())
+            self.assertIn("autostart: could not change the setting", log.get_recent())
         finally:
             os.environ["TEE_CST_AUTOSTART_PATH"] = saved
 
@@ -365,18 +365,18 @@ class MainWindowTest(unittest.TestCase):
                 self.assertIn("gui-test: Zeile eins", text)
                 # the user stops the server: label flips, server gets the reason
                 window.start_stop_button.emit("clicked")
-                self.assertEqual(["von dir gestoppt"], mock.disarm_reasons)
+                self.assertEqual(["stopped by you"], mock.disarm_reasons)
                 self.assertEqual("Start", window.start_stop_button.get_label())
                 self.assertTrue(window.start_stop_button.has_css_class("suggested-action"))
                 self.assertFalse(window.start_stop_button.has_css_class("destructive-action"))
                 self.assertEqual(ui.STATUS_STOPPED, window.status_label.get_text())
-                self.assertEqual("von dir gestoppt", window.subtitle_label.get_text())
+                self.assertEqual("stopped by you", window.subtitle_label.get_text())
                 window.start_stop_button.emit("clicked")
                 self.assertEqual(1, mock.arm_calls)
                 self.assertEqual("Stop", window.start_stop_button.get_label())
                 # the fuse trips behind the window's back: the tick picks it up
                 mock.is_armed = False
-                mock.trip_reason = "auf diesem PC funktioniert kein Video-Encoder. Nach der Behebung auf Start drücken."
+                mock.trip_reason = "no video encoder works on this PC. Press Start once it is fixed."
 
             def tripped_then_connect():
                 window = holder["window"]
@@ -393,8 +393,8 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual(ui.STATUS_CONNECTED + "10.42.0.151", window.status_label.get_text())
                 subtitle = window.subtitle_label.get_text()
                 self.assertTrue(subtitle.startswith(mock.settings_summary), subtitle)
-                self.assertIn("Quelle 70/s", subtitle)
-                self.assertIn("verworfen", subtitle)
+                self.assertIn("source 70/s", subtitle)
+                self.assertIn("discarded", subtitle)
                 self.assertTrue(window.status_dot.has_css_class("status-dot-live"))
                 self.assertFalse(window.status_dot.has_css_class("status-dot-idle"))
                 self.assertFalse(window.encoder_row.get_sensitive())
@@ -495,7 +495,7 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual(protocol.BITRATE_CHOICES_KBPS.index(6000), window.bitrate_row.get_selected())
                 self.assertEqual(protocol.ENTROPY_CODERS.index("cavlc"), window.coder_row.get_selected())
                 # the recommendation marks whatever the default bitrate currently is
-                self.assertIn("(empfohlen)", ui.BITRATE_LABELS[protocol.BITRATE_CHOICES_KBPS.index(protocol.KBPS)])
+                self.assertIn("(recommended)", ui.bitrate_labels()[protocol.BITRATE_CHOICES_KBPS.index(protocol.KBPS)])
                 self.assertTrue(ui.ENTROPY_LABELS[0].startswith("CAVLC"), ui.ENTROPY_LABELS)
                 self.assertTrue(window.bitrate_row.get_sensitive())
                 self.assertTrue(window.coder_row.get_sensitive())
@@ -538,9 +538,9 @@ class MainWindowTest(unittest.TestCase):
                 window.size_row.set_selected(protocol.STREAM_SIZES.index((1792, 1008)))
                 self.assertEqual((1280, 720), mock.stream_size, "der laufende Stream behält seine Größe")
                 recent = log.get_recent()
-                self.assertIn("video: erst den Stream beenden, dann die Auflösung wechseln", recent)
-                self.assertIn("video: erst den Stream beenden, dann die Bitrate wechseln", recent)
-                self.assertIn("video: erst den Stream beenden, dann die Entropie-Codierung wechseln", recent)
+                self.assertIn("video: end the stream first, then change the resolution", recent)
+                self.assertIn("video: end the stream first, then change the bitrate", recent)
+                self.assertIn("video: end the stream first, then change the entropy coder", recent)
                 mock.is_ps3_connected = False
                 mock.connected_ps3 = None
                 # a hand-edited settings file: the server hands back values these rows do not offer
@@ -575,7 +575,7 @@ class MainWindowTest(unittest.TestCase):
                 del window.hide_to_tray
                 self.assertFalse(window.get_visible())
                 self.assertIsNotNone(window.get_application(), "close must hide the window, never destroy it")
-                self.assertIn("Fenster: konnte nicht in den Hintergrund gehen", log.get_recent())
+                self.assertIn("window: could not go to the background", log.get_recent())
                 window.present_from_tray()
                 self.assertTrue(window.get_visible())
                 self.assertEqual(0, mock.shutdown_calls)
@@ -590,13 +590,13 @@ class MainWindowTest(unittest.TestCase):
                 mock.available_encoders = []
                 mock.chosen_encoder = None
                 mock.is_armed = False
-                mock.trip_reason = "auf diesem PC funktioniert kein Video-Encoder (ffmpeg fehlt oder kann kein H.264). Nach der Behebung auf Start drücken."
+                mock.trip_reason = "no video encoder works on this PC (ffmpeg is missing or cannot do H.264). Press Start once it is fixed."
 
             def window_says_so():
                 window = holder["window"]
                 self.assertEqual(0, window.encoder_model.get_n_items())
                 self.assertFalse(window.encoder_row.get_sensitive())
-                self.assertEqual("Kein H.264-Encoder gefunden", window.encoder_row.get_subtitle())
+                self.assertEqual("No H.264 encoder found", window.encoder_row.get_subtitle())
                 self.assertEqual(ui.STATUS_STOPPED, window.status_label.get_text())
                 self.assertEqual(mock.trip_reason, window.subtitle_label.get_text())
                 self.assertEqual("Start", window.start_stop_button.get_label())
@@ -691,7 +691,7 @@ class MainWindowTest(unittest.TestCase):
             def churned_without_damage():
                 stop.set()
                 self.assertEqual({main_thread}, seen_threads, "a widget moved outside the main loop")
-                self.assertNotIn("Fenster: Aktualisierung fehlgeschlagen", log.get_recent())
+                self.assertNotIn("window: refresh failed", log.get_recent())
 
             steps.add(100, start_the_churn)
             steps.add(1600, churned_without_damage)
@@ -733,7 +733,7 @@ class ApplicationTest(unittest.TestCase):
             mock.connected_ps3 = "10.42.0.151"
 
         def connected():
-            self.assertEqual([("ps3", "PS3 verbunden", "10.42.0.151 streamt.")], notifications)
+            self.assertEqual([("ps3", "PS3 connected", "10.42.0.151 is streaming.")], notifications)
             self.assertEqual(tray.ICON_LIVE, app.tray.icon_name)
             mock.is_ps3_connected = False
             mock.connected_ps3 = None
@@ -742,8 +742,8 @@ class ApplicationTest(unittest.TestCase):
 
         def tripped():
             self.assertEqual(3, len(notifications))
-            self.assertEqual(("ps3", "PS3 getrennt", "Warte, bis sie wiederkommt."), notifications[1])
-            self.assertEqual(("fuse", "Streaming gestoppt", mock.trip_reason), notifications[2])
+            self.assertEqual(("ps3", "PS3 disconnected", "Waiting for it to come back."), notifications[1])
+            self.assertEqual(("fuse", "Streaming stopped", mock.trip_reason), notifications[2])
             self.assertEqual(tray.ICON_IDLE, app.tray.icon_name)
             # the token the panel provided before its Activate reaches the window exactly once (the window's
             # present is stubbed: a made-up token must never reach the compositor on the developer's desktop)
@@ -784,7 +784,7 @@ class ApplicationTest(unittest.TestCase):
         GLib.idle_add(lambda: (steps.start(), GLib.SOURCE_REMOVE)[1])
         app.run(["tee-cell-stream-server"])
         steps.check()
-        self.assertEqual(["Läuft schon"], seen)
+        self.assertEqual(["Already running"], seen)
         self.assertTrue(app.start_failed, "main() turns this into exit status 1, like --headless")
         self.assertEqual(1, mock.start_calls)
         self.assertIsNone(app.window, "no window without a server")
@@ -820,7 +820,7 @@ class ApplicationTest(unittest.TestCase):
         steps.check()
         self.assertEqual(1, mock.shutdown_calls)
         self.assertFalse(app.tray.is_started, "the tray must go even when the server would not")
-        self.assertIn("ließ sich nicht sauber stoppen: Mutter antwortet nicht", log.get_recent())
+        self.assertIn("would not stop cleanly: Mutter antwortet nicht", log.get_recent())
 
     def test_the_exit_hook_goes_with_the_teardown(self):
         # atexit is the last-resort restore of the desktop resolution. Left registered, a shutdown that
@@ -895,7 +895,7 @@ class ApplicationTest(unittest.TestCase):
 
         def check():
             sys.stderr = sys.__stderr__
-            self.assertIn("abgestürzt: ZeroDivisionError:", log.get_recent())
+            self.assertIn("crashed: ZeroDivisionError:", log.get_recent())
             self.assertIn("ZeroDivisionError", quiet.getvalue(), "the traceback still goes to stderr")
             app.activate_action("quit", None)
 
@@ -916,7 +916,7 @@ class ApplicationTest(unittest.TestCase):
             worker.join(2)
         finally:
             sys.stderr = sys.__stderr__
-        self.assertIn("abgestürzt (Thread crash-probe): IndexError:", log.get_recent())
+        self.assertIn("crashed (Thread crash-probe): IndexError:", log.get_recent())
 
 
 class OpenLogTest(unittest.TestCase):
@@ -991,7 +991,7 @@ class RealServerApplicationTest(unittest.TestCase):
                 window = app.window
                 self.assertEqual(ui.STATUS_WAITING, window.status_label.get_text())
                 self.assertEqual(server.settings_summary, window.subtitle_label.get_text())
-                self.assertIn("1280x720 mit 60 fps", window.subtitle_label.get_text())
+                self.assertIn("1280x720 at 60 fps", window.subtitle_label.get_text())
                 names = [window.encoder_model.get_string(i) for i in range(window.encoder_model.get_n_items())]
                 self.assertEqual([encoder.name for encoder in server.available_encoders], names)
                 self.assertGreater(len(names), 0, "ffmpeg found no H.264 encoder at all")
@@ -1109,8 +1109,8 @@ class ProcessTest(unittest.TestCase):
 
     def test_single_instance_and_sigterm(self):
         first = self._spawn("--minimized")
-        self._wait_for(lambda: "lausche auf udp :%d" % self.port in self._log(), 15, "the server to bind")
-        self._wait_for(lambda: "bereit:" in self._log(), 15, "the encoder probe")
+        self._wait_for(lambda: "listening on udp :%d" % self.port in self._log(), 15, "the server to bind")
+        self._wait_for(lambda: "ready:" in self._log(), 15, "the encoder probe")
 
         client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         client.settimeout(3.0)
@@ -1125,14 +1125,14 @@ class ProcessTest(unittest.TestCase):
         second = self._spawn()
         self._wait_for(lambda: second.poll() is not None, 20, "the second copy to exit")
         self.assertEqual(0, second.returncode, self._output(second))
-        self._wait_for(lambda: "eine zweite Kopie wurde gestartet" in self._log(), 5, "the first copy to notice the second")
+        self._wait_for(lambda: "a second copy was started" in self._log(), 5, "the first copy to notice the second")
         self.assertIsNone(first.poll(), "the first copy must keep running")
 
         first.send_signal(signal.SIGTERM)
         self._wait_for(lambda: first.poll() is not None, 15, "the first copy to exit on SIGTERM")
         self.assertEqual(0, first.returncode, self._output(first))
         text = self._log()
-        self.assertIn("Signal 15 - beende", text)
+        self.assertIn("signal 15 - shutting down", text)
         self.assertNotIn("Traceback", self._output(first))
 
 
@@ -1182,7 +1182,7 @@ class TrayTest(unittest.TestCase):
                 _revision, (root_id, _root_props, children) = layout
                 self.assertEqual(0, root_id)
                 labels = [child[1].get("label", child[1].get("type")) for child in children]
-                self.assertEqual(["Anzeigen", "Log öffnen", "separator", "Beenden"], labels)
+                self.assertEqual(["Show", "Open the log", "separator", "Quit"], labels)
 
                 GLib.idle_add(lambda: (icon.set_live(True), GLib.SOURCE_REMOVE)[1])
                 self.assertTrue(wait_for(lambda: bus.call_sync(icon.bus_name, tray.ITEM_PATH, "org.freedesktop.DBus.Properties", "Get",
@@ -1284,7 +1284,7 @@ class TrayRestartTest(unittest.TestCase):
         self.assertEqual([], failures)
         recent = log.get_recent()
         self.assertNotIn("Busname", recent, "the name must be free again after every stop")
-        self.assertNotIn("Registrierung fehlgeschlagen", recent)
+        self.assertNotIn("registration failed", recent)
         self.assertGreaterEqual(log.generation(), seen_before)
 
 
@@ -1297,7 +1297,7 @@ class TrayWithoutWatcherTest(unittest.TestCase):
             self.assertFalse(icon.start())
             self.assertFalse(icon.is_started)
             icon.set_live(True)                      # must not raise without a connection
-            icon.set_tooltip("Warte auf eine PS3 …")
+            icon.set_tooltip("Waiting for a PS3 …")
             self.assertFalse(icon.is_registered)
             icon.stop()
             self.assertFalse(icon.is_registered)
@@ -1376,17 +1376,17 @@ class SourceRateTextTest(unittest.TestCase):
 
     def test_inside_the_band_says_so(self):
         for rate in (58, 59, 60, 61, 62):
-            self.assertIn("im Takt", ui.source_rate_text(rate, 60), rate)
-            self.assertIn("Quelle %d/s" % rate, ui.source_rate_text(rate, 60))
+            self.assertIn("on the cadence", ui.source_rate_text(rate, 60), rate)
+            self.assertIn(" · source %d/s" % rate, ui.source_rate_text(rate, 60))
 
     def test_above_the_band_names_the_consequence(self):
         for rate in (63, 70, 83):
-            self.assertIn("verworfen", ui.source_rate_text(rate, 60), rate)
+            self.assertIn("discarded", ui.source_rate_text(rate, 60), rate)
 
     def test_below_the_band_names_the_other_one(self):
         for rate in (20, 45, 57):
-            self.assertIn("gehalten", ui.source_rate_text(rate, 60), rate)
+            self.assertIn("held", ui.source_rate_text(rate, 60), rate)
 
     def test_the_band_follows_the_frame_rate_it_is_given(self):
-        self.assertIn("im Takt", ui.source_rate_text(30, 30))
-        self.assertIn("verworfen", ui.source_rate_text(40, 30))
+        self.assertIn("on the cadence", ui.source_rate_text(30, 30))
+        self.assertIn("discarded", ui.source_rate_text(40, 30))

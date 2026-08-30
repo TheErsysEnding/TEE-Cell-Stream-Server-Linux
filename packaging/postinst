@@ -12,7 +12,7 @@ case "$1" in
 
       # the extension only loads at the next login, and enabling is per user - so just say it once
       if [ -d /usr/share/gnome-shell/extensions/tee-cell-stream-scanout@tee.local ]; then
-         echo "tee-cell-stream-server: für Vollbild-Spiele einmal ab- und anmelden, dann"
+         echo "tee-cell-stream-server: for full-screen games, log out and in once, then"
          echo "  gnome-extensions enable tee-cell-stream-scanout@tee.local"
       fi
 
@@ -27,8 +27,8 @@ case "$1" in
       if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
          if ! ufw status 2>/dev/null | grep -q '38310/udp'; then
             ufw allow 38310/udp comment 'TEE Cell Stream Server (PS3 cell-stream)' >/dev/null 2>&1 \
-               && echo "tee-cell-stream-server: ufw-Regel für udp 38310 angelegt (PS3 → PC)." \
-               || echo "tee-cell-stream-server: konnte udp 38310 in ufw nicht freigeben - bitte manuell: sudo ufw allow 38310/udp"
+               && echo "tee-cell-stream-server: ufw rule for udp 38310 added (PS3 -> PC)." \
+               || echo "tee-cell-stream-server: could not open udp 38310 in ufw - please do it manually: sudo ufw allow 38310/udp"
          fi
       fi
       ;;

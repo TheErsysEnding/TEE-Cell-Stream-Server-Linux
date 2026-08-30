@@ -28,6 +28,7 @@ from .pad_receiver import PadReceiver
 from .power import keep_display_awake
 from .settings import settings
 from .virtual_gamepad import VirtualGamepad
+from .i18n import _
 
 BIND_ATTEMPTS = 25
 BIND_RETRY_S = 0.2
@@ -77,7 +78,7 @@ class Server:
             lambda: self.loss_recovery, self._on_all_encoders_failed,
             lambda: self.video_kbps, lambda: self.entropy_coder, lambda: self.stream_size,
             lambda: self.rate_control, lambda: self.slice_count)
-        # the same resolved binary the video uses (and the one the "bereit:" line names): audio must not
+        # the same resolved binary the video uses (and the one the "ready:" line names): audio must not
         # fall back to a bare "ffmpeg" off PATH while video runs an absolute path
         self.audio_streamer = AudioStreamer(self.sock, self.ffmpeg_path)   # desktop sound goes with the desktop picture
         self.pad_receiver = PadReceiver(DesktopInput(), VirtualGamepad(), lambda: self.swap_mouse_sticks)
@@ -86,8 +87,8 @@ class Server:
         self.available_encoders = encoders.detect_available(self.ffmpeg_path)
         self._chosen_encoder = encoders.load_choice(self.available_encoders, settings)
         if self._chosen_encoder is None:
-            self.trip_fuse("auf diesem PC funktioniert kein Video-Encoder (ffmpeg fehlt oder kann kein H.264)")
-        log.write("bereit: " + self.settings_summary + ", ffmpeg = " + self.ffmpeg_path)
+            self.trip_fuse("no video encoder works on this PC (ffmpeg is missing or cannot do H.264)")
+        log.write(_("ready: ") + self.settings_summary + ", ffmpeg = " + self.ffmpeg_path)
 
         self._running = True
         for name, target in (("beacon", self._run_beacon_loop), ("watchdog", self._run_client_watchdog),
@@ -116,7 +117,7 @@ class Server:
         if not self._running:
             return
         self._running = False
-        self.stop_streaming("der Server wird beendet")
+        self.stop_streaming("the server is shutting down")
         if self.pad_receiver is not None:
             self.pad_receiver.close()
         kill_all()
@@ -137,12 +138,12 @@ class Server:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
                 sock.bind(("0.0.0.0", protocol.SERVER_PORT))
                 self.sock = sock
-                log.write("lausche auf udp :%d, Beacon an :%d" % (protocol.SERVER_PORT, protocol.BEACON_PORT))
+                log.write(_("listening on udp :%d, beacon to :%d") % (protocol.SERVER_PORT, protocol.BEACON_PORT))
                 return True
             except OSError:
                 sock.close()
                 time.sleep(BIND_RETRY_S)
-        log.write("konnte udp :%d nicht belegen - eine andere Kopie des Servers hält den Port noch. Gebe auf." % protocol.SERVER_PORT)
+        log.write(_("could not take udp :%d - another copy of the server still holds the port. Giving up.") % protocol.SERVER_PORT)
         return False
 
     def _warm_up_capture(self) -> None:
@@ -150,14 +151,14 @@ class Server:
         try:
             capture.warm_up()
         except Exception as error:   # noqa: BLE001 - never let a portal hiccup kill the server
-            log.write("capture: Vorbereitung fehlgeschlagen: %s" % error)
+            log.write(_("capture: preparation failed: %s") % error)
 
     def _enable_shell_extension(self) -> None:
         """Switch on the bundled GNOME extension (see shell_extension.py) - the package cannot, we can."""
         try:
             self.extension_state = shell_extension.ensure_enabled()
         except Exception as error:   # noqa: BLE001 - never let this take the server down
-            log.write("extension: unerwarteter Fehler (%s)" % error)
+            log.write(_("extension: unexpected error (%s)") % error)
             self.extension_state = shell_extension.FAILED
 
     # ------------------------------------------------------------------ what the window shows
@@ -169,7 +170,7 @@ class Server:
     @property
     def settings_summary(self) -> str:
         recovery = "Intra-Refresh" if self.loss_recovery == "intra" else "Keyframes"
-        return "%dx%d mit %d fps, %d Mbit/s, %s, %s" % (self.stream_size + (protocol.FPS,
+        return "%dx%d at %d fps, %d Mbit/s, %s, %s" % (self.stream_size + (protocol.FPS,
                                                         self.video_kbps // 1000, self.entropy_coder.upper(), recovery))
 
     # the fuse. armed, the server answers the PS3; tripped, it ignores it and leaves the desktop alone.
@@ -182,7 +183,7 @@ class Server:
         self.trip_reason = None
         if self.live_streamer is not None:
             self.live_streamer.reset_failures()
-        log.write("gestartet: warte auf die PS3")
+        log.write(_("started: waiting for the PS3"))
 
     def disarm(self, why: str) -> None:
         if not self.is_armed:
@@ -190,10 +191,10 @@ class Server:
         self.is_armed = False
         self.trip_reason = why
         self.stop_streaming(why)
-        log.write("gestoppt: " + why)
+        log.write("stopped: " + why)
 
     def trip_fuse(self, fault: str) -> None:
-        self.disarm(fault + ". Nach der Behebung auf Start drücken.")
+        self.disarm(fault + ". Press Start once it is fixed.")
 
     def _on_all_encoders_failed(self, reason: str) -> None:
         self.trip_fuse(reason)
@@ -230,7 +231,7 @@ class Server:
         if value not in ("intra", "keyframe") or value == self.loss_recovery:
             return
         settings.set("loss_recovery", value)
-        log.write("video: Fehlerkorrektur ab dem nächsten Stream: " + ("Intra-Refresh" if value == "intra" else "Keyframes"))
+        log.write("video: error correction from the next stream on: " + ("Intra-Refresh" if value == "intra" else "Keyframes"))
 
     @property
     def video_kbps(self) -> int:
@@ -245,7 +246,7 @@ class Server:
         if value not in protocol.BITRATE_CHOICES_KBPS or value == self.video_kbps:
             return
         settings.set("video_kbps", int(value))
-        log.write("video: Bitrate ab dem nächsten Stream: %d Mbit/s" % (value // 1000))
+        log.write(_("video: bitrate from the next stream on: %d Mbit/s") % (value // 1000))
 
     @property
     def stream_size(self) -> tuple[int, int]:
@@ -265,7 +266,7 @@ class Server:
         if size not in protocol.STREAM_SIZES or size == self.stream_size:
             return
         settings.set("stream_size", "%dx%d" % size)
-        log.write("video: Auflösung ab dem nächsten Stream: %dx%d" % size)
+        log.write(_("video: resolution from the next stream on: %dx%d") % size)
 
     @property
     def entropy_coder(self) -> str:
@@ -278,7 +279,7 @@ class Server:
         if value not in protocol.ENTROPY_CODERS or value == self.entropy_coder:
             return
         settings.set("entropy_coder", value)
-        log.write("video: Entropie-Codierung ab dem nächsten Stream: " + value.upper())
+        log.write("video: entropy coder from the next stream on: " + value.upper())
 
     @property
     def rate_control(self) -> str:
@@ -293,7 +294,7 @@ class Server:
         if value not in protocol.RATE_CONTROLS or value == self.rate_control:
             return
         settings.set("rate_control", value)
-        log.write("video: Ratensteuerung ab dem nächsten Stream: " + value.upper())
+        log.write("video: rate control from the next stream on: " + value.upper())
 
     @property
     def captured_fps(self) -> int:
@@ -319,7 +320,7 @@ class Server:
         if value not in protocol.SLICE_COUNTS or value == self.slice_count:
             return
         settings.set("slice_count", value)
-        log.write("video: %d Slice(s) je Bild ab dem nächsten Stream (nur x264)" % value)
+        log.write(_("video: %d slice(s) per picture from the next stream on (x264 only)") % value)
 
     @property
     def swap_mouse_sticks(self) -> bool:
@@ -354,20 +355,20 @@ class Server:
             return
         settings.set("display_strategy", value)
         settings.set("switch_display_mode", value != "off")   # keep the old key truthful for older builds
-        log.write("display: Umschaltung ab dem nächsten Stream: " + value)
+        log.write("display: switching from the next stream on: " + value)
 
     # ------------------------------------------------------------------ the threads
 
     def _run_beacon_loop(self) -> None:
         targets = netinfo.get_beacon_targets()
-        log.write("Beacon an: " + " ".join(ip for ip, _port in targets))
+        log.write(_("beacon to: ") + " ".join(ip for ip, _port in targets))
         seconds_since_refresh = 0
         while self._running:
             for target in targets:
                 try:
                     self.sock.sendto(protocol.BEACON_MESSAGE, target)
                 except OSError as error:
-                    log.write("Beacon an %s fehlgeschlagen: %s" % (target[0], error))
+                    log.write(_("beacon to %s failed: %s") % (target[0], error))
             time.sleep(protocol.BEACON_INTERVAL_S)
             seconds_since_refresh += 1
             if seconds_since_refresh >= protocol.BEACON_REFRESH_TARGETS_S:   # pick up NIC changes
@@ -393,7 +394,7 @@ class Server:
             try:
                 self._handle_command(packet, sender)
             except Exception as error:   # noqa: BLE001 - one bad packet must not end the receive loop
-                log.write("Fehler bei Paket von %s: %s" % (sender[0], error))
+                log.write(_("error in a packet from %s: %s") % (sender[0], error))
 
     def _handle_command(self, packet: bytes, sender) -> None:
         text = packet.decode("ascii", "replace")
@@ -423,9 +424,9 @@ class Server:
                 return
             custom_commands.run(slot)
         elif text.startswith("STOP"):
-            self.stop_streaming("die PS3 hat uns gebeten aufzuhören")
+            self.stop_streaming("the PS3 asked us to stop")
         else:
-            log.write("unbekanntes Paket von %s: %r" % (sender[0], text[:40]))
+            log.write(_("unknown packet from %s: %r") % (sender[0], text[:40]))
 
     def stop_streaming(self, why: str) -> None:
         """Everything a stream turns on gets turned off here, whoever asked - a STOP, or the PS3 vanishing."""
@@ -442,7 +443,7 @@ class Server:
             self.display_mode.restore()
             keep_display_awake(False)   # idle again: let the screen sleep
             if was_streaming:
-                log.write("Stream beendet: " + why + ". Warte wieder auf die PS3.")
+                log.write(_("stream ended: ") + why + _(". Waiting for the PS3 again."))
 
     def _run_client_watchdog(self) -> None:
         """The PS3 sends its pad 60x a second for as long as it is streaming, so silence means it is gone."""
@@ -452,9 +453,9 @@ class Server:
                 # the pump can stop on its own (every encoder failed, or ffmpeg died) with nothing to put the
                 # desktop back. if it left the resolution switched, restore it here.
                 if self.display_mode.is_changed:
-                    self.stop_streaming("der Encoder hat von selbst aufgehört")
+                    self.stop_streaming("the encoder stopped on its own")
                 continue
             timeout_ms = protocol.CLIENT_TIMEOUT_MS if self._stream_confirmed else protocol.STREAM_STARTUP_GRACE_MS
             if (time.monotonic() - self._last_client_packet) * 1000 < timeout_ms:
                 continue
-            self.stop_streaming("seit %dms nichts von der PS3" % timeout_ms)
+            self.stop_streaming("nothing from the PS3 for %dms" % timeout_ms)

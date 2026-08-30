@@ -27,7 +27,7 @@ Details im englischen [README.md](README.md).
 ## Installation (1 Klick)
 
 ```
-sudo apt install ./tee-cell-stream-server_1.21.1_all.deb
+sudo apt install ./tee-cell-stream-server_1.22.0_all.deb
 ```
 
 Alles Nötige (ffmpeg mit NVENC, GStreamer/PipeWire, GTK4/libadwaita, evdev, Portal) kommt aus den
@@ -57,6 +57,11 @@ Während des Streams gehen **alle Tasten an den PC**; die App nutzt SELECT als M
 | SELECT + Quadrat | Stream-Modus: vsync aus → vsync → vsync + 1 Frame Puffer |
 | SELECT + R3 | Statistik-Panel ein/aus |
 | SELECT + Dreieck/Kreis/L1/R1 | Custom-Befehl 1–4 (Reiter *Befehle*, Standard 1 = Steam Big Picture) |
+
+**Sprache.** Das Fenster ist standardmäßig auf Englisch. Unter *System → Sprache* stellst du auf Deutsch um
+und zurück – die Umstellung ist sofort sichtbar, ohne Neustart. Log-Zeilen werden beim Schreiben übersetzt;
+bereits geschriebene Zeilen behalten also ihre Sprache, denn ein Log ist ein Protokoll, keine Ansicht.
+
 | START (nicht streamend) | App beenden |
 
 Maus-Modus: linker Stick = Zeiger, rechter Stick = Scrollen, Kreuz/Kreis/Quadrat = links/rechts/mitte,

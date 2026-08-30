@@ -63,7 +63,7 @@ def _server_is_streaming() -> bool:
     except OSError:
         return False
     for line in reversed(tail):
-        if "Stream beendet" in line or "gestoppt:" in line:
+        if "Stream beendet" in line or "stopped:" in line:
             return False
         if "display: Desktop auf" in line or "live: erstes Frame" in line:
             return True
@@ -236,7 +236,7 @@ class CustomCommandsTests(unittest.TestCase):
         with open(marker, encoding="utf-8") as handle:
             pid, sid = handle.read().split()
         self.assertEqual(pid, sid, "Kindprozess ist nicht in einer eigenen Session")
-        self.assertIn("custom 2: gestartet:", log.get_recent())
+        self.assertIn("custom 2: started:", log.get_recent())
 
     def test_run_uri_goes_to_xdg_open_without_launching(self):
         custom_commands.set(1, {"kind": "run", "value": "steam://open/bigpicture", "label": "Big Picture"})
@@ -252,13 +252,13 @@ class CustomCommandsTests(unittest.TestCase):
         custom_commands.set(3, {"kind": "run", "value": "   ", "label": "leer"})
         custom_commands.run(3)
         self.assertEqual(log.generation() - before, 4)
-        self.assertIn("custom 42: an diesem Slot hängt nichts", log.get_recent())
+        self.assertIn("custom 42: nothing is bound to this slot", log.get_recent())
 
     def test_run_failure_is_logged_not_raised(self):
         custom_commands.set(2, {"kind": "run", "value": "echo x", "label": ""})
         with mock.patch.object(custom_commands, "_spawn", side_effect=FileNotFoundError("sh")):
             custom_commands.run(2)
-        self.assertIn("custom 2: konnte echo x nicht starten", log.get_recent())
+        self.assertIn("custom 2: could not start echo x", log.get_recent())
 
 
 # ------------------------------------------------------------------------------------------------ power
@@ -319,7 +319,7 @@ class PowerTests(unittest.TestCase):
             power.keep_display_awake(True)
             power.keep_display_awake(True)
         recent = log.get_recent()
-        self.assertEqual(recent.count("power: kann den Bildschirm nicht wach halten"), 1)
+        self.assertEqual(recent.count("power: cannot keep the screen awake"), 1)
         self.assertIn("weg", recent)
         self.assertNotIn("GDBus.Error", recent)
         power.keep_display_awake(False)   # nothing was held
@@ -582,7 +582,7 @@ class MutterBackendTests(unittest.TestCase):
             with self.assertRaises(display_mode.DisplayError) as refused:
                 backend.switch(snapshot, 640, 480, 60)
         apply.assert_not_called()
-        self.assertEqual(str(refused.exception), "kein Modus 640x480 auf DP-1")
+        self.assertEqual(str(refused.exception), "no 640x480 mode on DP-1")
 
     def test_restore_reads_a_fresh_serial_and_retries_once(self):
         backend, snapshot = self._backend_and_snapshot()
@@ -620,7 +620,7 @@ class MutterBackendTests(unittest.TestCase):
             detail = backend.switch(snapshot, 1280, 720, 60)
             self.assertEqual(runs[1], ["--output", "DP-2", "--mode", "1280x720", "--rate", "60.00"])
             self.assertEqual(runs[2], ["--output", "DP-2", "--mode", "1280x720"])
-            self.assertEqual(detail, "DP-2 1280x720 (Rate von xrandr gewählt)")
+            self.assertEqual(detail, "DP-2 1280x720 (rate chosen by xrandr)")
             self.assertEqual(backend.restore(), "2560x1440 (DP-2)")
             self.assertEqual(runs[3], ["--output", "DP-2", "--mode", "2560x1440", "--rate", "320.00"])
 
@@ -631,7 +631,7 @@ class MutterBackendTests(unittest.TestCase):
             snapshot = backend.read()
             with self.assertRaises(display_mode.DisplayError) as refused:
                 backend.switch(snapshot, 1280, 720, 60)
-        self.assertEqual(str(refused.exception), "xrandr: nope; ohne Rate: xrandr: nope")
+        self.assertEqual(str(refused.exception), "xrandr: nope; without a rate: xrandr: nope")
         self.assertIsNone(backend._original)
 
 
@@ -654,12 +654,12 @@ class DisplayModeSwitchLogicTests(unittest.TestCase):
         self.assertTrue(mode.is_changed)
         self.assertTrue(mode.match_to(1280, 720, 60))   # a repeat PLAY: no second read, no second switch
         self.assertEqual(backend.calls, ["read", ("switch", 1280, 720, 60)])
-        self.assertIn("display: Desktop auf 1280x720 umgeschaltet (war 2560x1440; fake-mode)", log.get_recent())
+        self.assertIn("display: desktop switched to 1280x720 (was 2560x1440; fake-mode)", log.get_recent())
         mode.restore()
         mode.restore()
         self.assertFalse(mode.is_changed)
         self.assertEqual(backend.calls, ["read", ("switch", 1280, 720, 60), "restore"])
-        self.assertIn("display: Desktop wieder auf 2560x1440", log.get_recent())
+        self.assertIn("display: desktop back at 2560x1440", log.get_recent())
 
     def test_a_desktop_already_on_the_target_says_so_and_asks_nothing(self):
         """The old wording promised a switch even when there was nothing to switch, which read like a bug.
@@ -674,7 +674,7 @@ class DisplayModeSwitchLogicTests(unittest.TestCase):
         self.assertFalse(mode.is_changed)
         self.assertEqual([], asked, "ohne Wechsel darf nicht gefragt werden")
         recent = log.get_recent()
-        self.assertIn("steht schon auf 2560x1440", recent)
+        self.assertIn("is already at 2560x1440", recent)
         self.assertEqual(switches_before, recent.count("umgeschaltet"), "es wurde nichts umgeschaltet")
         self.assertNotIn(("switch", 2560, 1440, 320.0), backend.calls)
 
@@ -700,9 +700,9 @@ class DisplayModeSwitchLogicTests(unittest.TestCase):
             mode.arm_confirmation()
             self.assertEqual([0.2], asked, "der Nutzer muss gefragt worden sein")
             time.sleep(0.6)
-        self.assertFalse(mode.is_changed, "ohne Antwort muss die alte Auflösung zurück sein")
+        self.assertFalse(mode.is_changed, "with no answer the old resolution has to be back")
         self.assertEqual(backend.calls, ["read", ("switch", 1920, 1080, 120), "restore"])
-        self.assertIn("keine Bestätigung", log.get_recent())
+        self.assertIn("no confirmation", log.get_recent())
 
     def test_a_confirmed_switch_stays(self):
         backend = _FakeBackend(2560, 1440)
@@ -747,21 +747,21 @@ class DisplayModeSwitchLogicTests(unittest.TestCase):
             mode.arm_confirmation()
             time.sleep(0.5)
         self.assertTrue(mode.is_changed)
-        self.assertIn("Rückfrage ging nicht auf", log.get_recent())
+        self.assertIn("could not ask", log.get_recent())
 
     def test_refusal_logs_and_streams_scaled(self):
         backend = _FakeBackend(2560, 1440, switch_error="Logical monitors not adjacent")
         mode = display_mode.DisplayMode(backend=backend)
         self.assertFalse(mode.match_to(1280, 720, 60))
         self.assertFalse(mode.is_changed)
-        self.assertIn("display: 1280x720 wurde abgelehnt (Logical monitors not adjacent), streame stattdessen skaliert", log.get_recent())
+        self.assertIn("display: 1280x720 was refused (Logical monitors not adjacent), streaming scaled instead", log.get_recent())
         mode.restore()
         self.assertNotIn("restore", backend.calls)
 
     def test_unreadable_state_logs_and_streams_scaled(self):
         mode = display_mode.DisplayMode(backend=display_mode._NullBackend())
         self.assertFalse(mode.match_to(1280, 720, 60))
-        self.assertIn("display: konnte die aktuelle Auflösung nicht lesen", log.get_recent())
+        self.assertIn("display: could not read the current resolution", log.get_recent())
 
     def test_restore_failure_clears_flag_and_logs(self):
         backend = _FakeBackend(2560, 1440, restore_error="stale")
@@ -769,14 +769,14 @@ class DisplayModeSwitchLogicTests(unittest.TestCase):
         self.assertTrue(mode.match_to(1280, 720, 60))
         mode.restore()
         self.assertFalse(mode.is_changed)   # cleared first, so nothing fights a second call
-        self.assertIn("display: Wiederherstellung von 2560x1440 fehlgeschlagen (stale)", log.get_recent())
+        self.assertIn("display: restoring 2560x1440 failed (stale)", log.get_recent())
 
 
 class DisplayModeRealTests(unittest.TestCase):
     """Read-only against the live compositor; the real switch needs TEE_CST_DISPLAY_TEST=1."""
 
     @unittest.skipUnless(MUTTER_ON_BUS, "org.gnome.Mutter.DisplayConfig nicht auf dem Session-Bus")
-    @unittest.skipIf(_server_is_streaming(), "ein laufender Stream hält den Desktop auf der Stream-Auflösung")
+    @unittest.skipIf(_server_is_streaming(), "a running stream holds the desktop at the stream resolution")
     def test_real_state_primary_dp2_and_720p60_mode(self):
         state = display_mode.read_current_state()
         self.assertGreaterEqual(state.serial, 0)
@@ -843,7 +843,7 @@ class DisplayModeRealTests(unittest.TestCase):
         self.assertEqual(after.find_monitor(after_primary.connectors[0]).current_mode().id, original)
         self.assertEqual(after_primary.scale, primary.scale)
         self.assertEqual((after_primary.x, after_primary.y), (primary.x, primary.y))
-        self.assertIn("display: Desktop wieder auf 2560x1440", log.get_recent())
+        self.assertIn("display: desktop back at 2560x1440", log.get_recent())
 
 
 if __name__ == "__main__":

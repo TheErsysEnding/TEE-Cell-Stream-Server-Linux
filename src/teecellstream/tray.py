@@ -18,6 +18,7 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, Gio, GLib  # noqa: E402
 
 from . import APP_EXEC, APP_ID, APP_NAME, log  # noqa: E402
+from .i18n import _
 
 WATCHER_NAME = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"
@@ -190,10 +191,10 @@ class TrayIcon:
         self._logged_no_watcher = False
         self._activation_token: str | None = None
         self._menu_items = (
-            (MENU_SHOW, "Anzeigen", self._on_show),
-            (MENU_OPEN_LOG, "Log öffnen", self._on_open_log),
+            (MENU_SHOW, _("Show"), self._on_show),
+            (MENU_OPEN_LOG, _("Open the log"), self._on_open_log),
             (MENU_SEPARATOR, None, None),
-            (MENU_QUIT, "Beenden", self._on_quit),
+            (MENU_QUIT, _("Quit"), self._on_quit),
         )
 
     # ------------------------------------------------------------------ lifecycle
@@ -227,9 +228,9 @@ class TrayIcon:
                                          GLib.Variant("(su)", (self._bus_name, 0)), GLib.VariantType("(u)"),
                                          Gio.DBusCallFlags.NONE, 3000, None)
             if reply.unpack()[0] != 1:   # not the primary owner: a stale copy with our pid? cannot happen, but be honest
-                log.write("tray: Busname %s nicht bekommen" % self._bus_name)
+                log.write(_("tray: did not get bus name %s") % self._bus_name)
         except GLib.Error as error:
-            log.write("tray: kein Session-Bus (%s) - ohne Tray-Symbol" % error.message)
+            log.write(_("tray: no session bus (%s) - no tray icon") % error.message)
             return False
         self._connection = connection
         # the watcher comes and goes with the shell (and its extension); register whenever it is there
@@ -267,13 +268,13 @@ class TrayIcon:
         self.is_registered = False
         if not self._logged_no_watcher:
             self._logged_no_watcher = True
-            log.write("tray: kein StatusNotifierWatcher (AppIndicator-Erweiterung aus?) - ohne Tray-Symbol")
+            log.write(_("tray: no StatusNotifierWatcher (AppIndicator extension off?) - no tray icon"))
 
     def _on_registered(self, connection, result) -> None:
         try:
             connection.call_finish(result)
         except GLib.Error as error:
-            log.write("tray: Registrierung fehlgeschlagen: %s" % error.message)
+            log.write(_("tray: registration failed: %s") % error.message)
             return
         self.is_registered = True
 
@@ -303,7 +304,7 @@ class TrayIcon:
         try:
             self._connection.emit_signal(None, path, interface, name, parameters)
         except GLib.Error as error:
-            log.write("tray: Signal %s fehlgeschlagen: %s" % (name, error.message))
+            log.write(_("tray: signal %s failed: %s") % (name, error.message))
 
     def _dispatch(self, callback) -> None:
         """Run the app's handler after the DBus reply has gone out (Quit tears the connection down)."""
@@ -314,7 +315,7 @@ class TrayIcon:
             try:
                 callback()
             except Exception as error:   # noqa: BLE001 - a tray click must never take the server down
-                log.write("tray: Aktion fehlgeschlagen: %s" % error)
+                log.write(_("tray: action failed: %s") % error)
             return GLib.SOURCE_REMOVE
         GLib.idle_add(run)
 

@@ -187,7 +187,7 @@ class LadderTests(unittest.TestCase):
     def test_ladder_order_kinds_and_names(self):
         self.assertEqual([e.kind for e in encoders.LADDER], ["nvenc", "vaapi", "x264"])
         self.assertEqual([e.name for e in encoders.LADDER],
-                         ["NVIDIA GPU (NVENC)", "Intel/AMD GPU (VA-API)", "CPU (x264 – weniger fps möglich)"])
+                         ["NVIDIA GPU (NVENC)", "Intel/AMD GPU (VA-API)", "CPU (x264 – fewer fps possible)"])
         self.assertEqual([e.supports_intra_refresh for e in encoders.LADDER], [True, False, True])
         self.assertEqual(str(X264), X264.name)   # what a dropdown shows
 
@@ -390,14 +390,14 @@ class ProbeOnThisMachineTests(unittest.TestCase):
         if os.path.exists("/dev/nvidiactl") and not va_drivers:
             self.assertEqual(kinds, ["nvenc", "x264"])
         if "vaapi" not in kinds:
-            lines = [line for line in recent.splitlines() if VAAPI.name + " nicht verfügbar" in line]
+            lines = [line for line in recent.splitlines() if VAAPI.name + " not available" in line]
             self.assertTrue(lines, "kein Log-Eintrag für die VA-API-Probe:\n" + recent)
-            self.assertRegex(lines[-1], r"nicht verfügbar: \S+", "Fehlgrund fehlt: " + lines[-1])
+            self.assertRegex(lines[-1], r"not available: \S+", "reason for the failure missing: " + lines[-1])
 
     def test_missing_ffmpeg_is_logged_not_raised(self):
         self.assertEqual(encoders.detect_available("/nonexistent/tee-cst-ffmpeg"), [])
-        self.assertIn("encoders: konnte NVIDIA GPU (NVENC) nicht testen", log.get_recent())
-        self.assertIn("encoders: keiner funktioniert auf diesem PC", log.get_recent())
+        self.assertIn("encoders: could not test NVIDIA GPU (NVENC)", log.get_recent())
+        self.assertIn("encoders: none of them works on this PC", log.get_recent())
 
     def _run_five_frames(self, encoder):
         # a lavfi source stands in for the capture; -frames:v after the input is an output option, so

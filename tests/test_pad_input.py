@@ -281,8 +281,8 @@ class PadReceiverTests(unittest.TestCase):
         receiver.set_gamepad_mode(False)
         receiver.handle(cp_packet(2, 0, 1, 2, 3, 4), SENDER)
         self.assertEqual(self.desktop.applied, [(0, 1, 2, 3, 4)])
-        self.assertIn("pad: steuert jetzt ein virtuelles Xbox-Gamepad", log.get_recent())
-        self.assertIn("pad: steuert jetzt Maus und Tastatur", log.get_recent())
+        self.assertIn("pad: now driving a virtual Xbox gamepad", log.get_recent())
+        self.assertIn("pad: now driving mouse and keyboard", log.get_recent())
 
     def test_missing_gamepad_keeps_the_mouse_and_asks_only_once(self):
         receiver = self.make(gamepad=FakeGamepad(can_open=False))
@@ -290,7 +290,7 @@ class PadReceiverTests(unittest.TestCase):
         receiver.set_gamepad_mode(True)      # the PS3 repeats PADMODE every second
         self.assertFalse(receiver.gamepad_mode)
         self.assertEqual(self.gamepad.open_attempts, 1)
-        self.assertIn("pad: kein virtuelles Gamepad verfügbar", log.get_recent())
+        self.assertIn("pad: no virtual gamepad available", log.get_recent())
         receiver.handle(cp_packet(1, 0, 0, 0, 0, 0), SENDER)
         self.assertEqual(len(self.desktop.applied), 1)
 
@@ -345,8 +345,8 @@ class PadReceiverTests(unittest.TestCase):
         receiver.handle(cp_packet(1, 0xFFFF), SENDER)
         receiver.handle(cp_packet(2, 0), SENDER)
         names = "+".join(protocol.BUTTON_NAMES)                  # bit order as in the PS3's pad.h
-        self.assertIn("pad: gedrückt " + names, log_since("test-marker-alle-knoepfe"))
-        self.assertIn("pad: losgelassen " + names, log_since("test-marker-alle-knoepfe"))
+        self.assertIn("pad: pressed " + names, log_since("test-marker-alle-knoepfe"))
+        self.assertIn("pad: released " + names, log_since("test-marker-alle-knoepfe"))
 
     def test_the_report_repeats_only_when_something_changed(self):
         receiver = self.make()
@@ -373,7 +373,7 @@ class PadReceiverTests(unittest.TestCase):
         receiver.report_interval_ms = 0             # report on every packet instead of every 2 s
         receiver.handle(cp_packet(1, 0, 1, 2, 3, 4, sent_us=now_us() - 7_000), SENDER)
         self.assertIn(receiver.last_trip_ms, (7, 8))
-        self.assertIn("pad: Sticks L(1,2) R(3,4), 1 Pakete, 0 verloren, %d ms PS3 -> hier" % receiver.last_trip_ms,
+        self.assertIn("pad: Sticks L(1,2) R(3,4), 1 packets, 0 lost, %d ms PS3 -> here" % receiver.last_trip_ms,
                       log.get_recent())
         receiver.handle(cp_packet(2, 0, 0, 0, 0, 0, sent_us=now_us() + 5_000_000), SENDER)   # clock skew: never negative
         self.assertEqual(receiver.last_trip_ms, 0)
@@ -384,9 +384,9 @@ class PadReceiverTests(unittest.TestCase):
         receiver.handle(cp_packet(2, bits("L1")), SENDER)
         receiver.handle(cp_packet(3, bits("L1")), SENDER)     # unchanged: nothing new logged
         recent = log.get_recent()
-        self.assertIn("pad: gedrückt cross+L1", recent)
-        self.assertIn("pad: losgelassen cross", recent)
-        self.assertEqual(recent.count("pad: losgelassen cross"), 1)
+        self.assertIn("pad: pressed cross+L1", recent)
+        self.assertIn("pad: released cross", recent)
+        self.assertEqual(recent.count("pad: released cross"), 1)
 
     def test_short_and_malformed_packets_never_raise(self):
         receiver = self.make()
@@ -532,7 +532,7 @@ class VirtualGamepadMappingTests(unittest.TestCase):
         receiver.close()
         recent = log_since("test-marker-broken-pad")
         self.assertEqual(recent.count("test-marker-9001"), 1)
-        self.assertEqual(recent.count("pad: Gamepad-Report fehlgeschlagen"), 1)
+        self.assertEqual(recent.count("pad: gamepad report failed"), 1)
         self.assertEqual(receiver.packets_received, 60)
 
 
@@ -557,10 +557,10 @@ class WithoutUinputTests(unittest.TestCase):
             self.assertFalse(desktop.is_open)
             self.assertEqual(receiver.packets_received, 3)
         recent = log_since("test-marker-no-evdev")
-        self.assertEqual(recent.count("pad: python3-evdev fehlt - kein virtuelles Gamepad möglich"), 1)
-        self.assertEqual(recent.count("pad: kein virtuelles Gamepad verfügbar"), 1)
-        self.assertEqual(recent.count("pad: uinput nicht verfügbar (python3-evdev fehlt)"), 1)
-        self.assertIn("pad: gedrückt cross+start", recent)                 # the packet path itself keeps working
+        self.assertEqual(recent.count("pad: python3-evdev is missing - no virtual gamepad possible"), 1)
+        self.assertEqual(recent.count("pad: no virtual gamepad available"), 1)
+        self.assertEqual(recent.count("pad: uinput not available (python3-evdev is missing)"), 1)
+        self.assertIn("pad: pressed cross+start", recent)                 # the packet path itself keeps working
 
     def test_gamepad_open_failure_names_the_reason_and_stays_closed(self):
         def refused(*_args, **_kwargs):
@@ -575,7 +575,7 @@ class WithoutUinputTests(unittest.TestCase):
             gamepad.close()
         recent = log.get_recent()
         self.assertIn("test-marker-0815", recent)
-        self.assertIn("/dev/uinput beschreibbar?", recent)
+        self.assertIn("/dev/uinput writable?", recent)
 
 
 @unittest.skipIf(evdev is None, "python3-evdev fehlt")
@@ -890,7 +890,7 @@ class DesktopInputMappingTests(unittest.TestCase):
         desktop.type_character("a")
         self.assertFalse(desktop.is_open)
         self.assertEqual(log.get_recent().count("test-marker-4711"), 1)
-        self.assertIn("pad: uinput nicht verfügbar", log.get_recent())
+        self.assertIn("pad: uinput not available", log.get_recent())
 
     def test_a_broken_device_is_reported_once(self):
         class Broken(FakeEmitter):
@@ -910,7 +910,7 @@ class DesktopInputMappingTests(unittest.TestCase):
         desktop.close()
         recent = log_since("test-marker-broken-maus")
         self.assertEqual(recent.count("test-marker-9002"), 1)
-        self.assertEqual(recent.count("pad: Eingabe an uinput fehlgeschlagen"), 1)
+        self.assertEqual(recent.count("pad: input to uinput failed"), 1)
 
     def test_close_releases_and_never_reopens(self):
         desktop = self.make()
@@ -951,7 +951,7 @@ class DesktopInputMappingTests(unittest.TestCase):
         desktop.type_character("y")
         desktop.type_character(" ")
         self.assertEqual(self.keyboard.keys(), [(KEY_Z, 1), (KEY_Z, 0), (KEY_SPACE, 1), (KEY_SPACE, 0)])
-        self.assertIn("pad: Tastaturlayout de, libxkbcommon", log.get_recent())
+        self.assertIn("pad: keyboard layout de, libxkbcommon", log.get_recent())
         self.assertEqual(self.mouse.events, [])
 
     @unittest.skipIf(not desktop_input.have_xkbcommon(), "libxkbcommon fehlt")
@@ -975,7 +975,7 @@ class DesktopInputMappingTests(unittest.TestCase):
             desktop_input.build_key_table("kein-solches-layout-4711")
         fallback = desktop_input.get_key_table("kein-solches-layout-4711")
         self.assertEqual(fallback.lookup("z")[0], KEY_Z)               # us instead
-        self.assertIn("pad: Tastaturlayout kein-solches-layout-4711 nicht ladbar", log.get_recent())
+        self.assertIn("pad: keyboard layout kein-solches-layout-4711 cannot be loaded", log.get_recent())
 
     @unittest.skipIf(not desktop_input.have_xkbcommon(), "libxkbcommon fehlt")
     def test_characters_stay_on_the_ordinary_keys(self):
@@ -1034,7 +1034,7 @@ class DesktopInputMappingTests(unittest.TestCase):
             self.assertFalse(worker.is_alive())
         self.assertEqual(len(tables), 4)
         self.assertEqual(len({id(table) for table in tables}), 1)     # everyone ends up on the cached one
-        self.assertEqual(log_since("test-marker-layout-race").count("pad: Tastaturlayout %s nicht ladbar" % name), 1)
+        self.assertEqual(log_since("test-marker-layout-race").count("pad: keyboard layout %s cannot be loaded" % name), 1)
 
     def test_the_layout_table_is_warmed_up_off_the_packet_path(self):
         """The first KEY packet arrives on the receive thread; the table must already be there."""
@@ -1061,7 +1061,7 @@ class DesktopInputMappingTests(unittest.TestCase):
         desktop.type_character("中")
         desktop.type_character("")
         self.assertEqual(self.keyboard.events, [])
-        self.assertEqual(log.get_recent().count("pad: kein Tastencode für '中'"), 1)
+        self.assertEqual(log.get_recent().count("pad: no key code for '中'"), 1)
 
     def test_us_fallback_table(self):
         table = desktop_input.us_fallback_table()

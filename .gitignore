@@ -5,7 +5,7 @@ dist/*.deb
 .venv*/
 
 # working documents, not part of the package
-FUER-MOHASI.md
+FUER-MOHASI-2.md
 NOTIZEN-offen.md
 KOMMENTAR-github.md
 ANTWORT-github.md

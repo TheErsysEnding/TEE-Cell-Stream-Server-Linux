@@ -20,6 +20,7 @@ import time
 
 from . import log, portal
 from .settings import settings
+from .i18n import _
 
 GST_LAUNCH = "gst-launch-1.0"
 GST_EXIT_WAIT_S = 2.0
@@ -254,7 +255,7 @@ class _PipeCapture(ScreenCapture):
         except portal.PortalError:
             return False   # the portal already said why
         except Exception as error:   # noqa: BLE001 - a broken source must not take the receive thread down
-            log.write("capture: %s: Quelle lässt sich nicht öffnen: %s" % (self.name, error))
+            log.write(_("capture: %s: cannot open the source: %s") % (self.name, error))
             return False
 
         args = [GST_LAUNCH, "-q", *source,
@@ -273,7 +274,7 @@ class _PipeCapture(ScreenCapture):
             self._process = _popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    pass_fds=self._source_fds())
         except Exception as error:   # noqa: BLE001 - whatever the spawner throws, the portal session must not leak
-            log.write("capture: %s startet nicht: %s" % (GST_LAUNCH, error))
+            log.write(_("capture: %s does not start: %s") % (GST_LAUNCH, error))
             self._close_source()
             return False
         self._after_spawn()
@@ -284,7 +285,7 @@ class _PipeCapture(ScreenCapture):
         self._drain.start()
         self._reader = threading.Thread(target=self._run_reader, args=(self._process, self._stop), name="capture-reader", daemon=True)
         self._reader.start()
-        log.write("capture: %s gestartet (%dx%d, %d fps, pid %d)" % (self.name, width, height, fps, self._process.pid))
+        log.write(_("capture: %s started (%dx%d, %d fps, pid %d)") % (self.name, width, height, fps, self._process.pid))
         return True
 
     def ffmpeg_input_args(self) -> list[str]:
@@ -319,9 +320,9 @@ class _PipeCapture(ScreenCapture):
             if stop.wait(FIRST_FRAME_POLL_S):
                 return
             if not reader.is_alive() and self._latest < 0:
-                log.write("capture: die Quelle lieferte kein einziges Bild")
+                log.write(_("capture: the source delivered no picture at all"))
                 return
-        log.write("capture: sende Bilder an ffmpeg (erstes %d ms nach dem Start)" % int((time.monotonic() - self._started_at) * 1000))
+        log.write(_("capture: sending pictures to ffmpeg (first one %d ms after the start)") % int((time.monotonic() - self._started_at) * 1000))
 
         buffers = self._buffers   # this run's buffers: a start() that re-used the instance must not be touched by us
 
@@ -481,14 +482,14 @@ class _PipeCapture(ScreenCapture):
             elif (not frozen_logged and now - last_new >= FROZEN_HINT_S
                     and source is not None and source.poll() is None):
                 frozen_logged = True
-                log.write("capture: die Bildschirmaufnahme liefert seit %.0fs kein neues Bild, obwohl sie läuft - "
-                          "das passiert, wenn ein Spiel im Vollbild läuft (GNOME reicht es dann direkt an den "
-                          "Monitor durch). Randloses Fenster hilft sofort; dauerhaft die beiliegende "
+                log.write("capture: the screen capture has produced no new picture for %.0fs although it is running - "
+                          "this happens when a game runs full-screen (GNOME then hands it straight to the "
+                          "monitor). A borderless window helps at once; for good, the bundled "
                           "GNOME-Erweiterung aktivieren." % FROZEN_HINT_S)
             try:
                 write(memoryview(buffers[index]))
             except (OSError, ValueError) as error:   # BrokenPipe: ffmpeg is gone; ValueError: its pipe was closed under us
-                log.write("capture: ffmpeg nimmt keine Bilder mehr an (%s)" % error)
+                log.write(_("capture: ffmpeg accepts no more pictures (%s)") % error)
                 break
             finally:
                 with self._gate:
@@ -566,7 +567,7 @@ class _PipeCapture(ScreenCapture):
         pictures: a smooth 60 fps stream keeps every one of them near 16.7 ms."""
         gaps = list(self._content_gaps_ms)
         if len(gaps) < 30:
-            return "capture: zu wenige Bilder für eine Gleichmäßigkeits-Aussage (%d)" % len(gaps)
+            return "capture: too few pictures to say anything about smoothness (%d)" % len(gaps)
         gaps.sort()
         median = gaps[len(gaps) // 2]
         p90, p99 = gaps[int(len(gaps) * 0.90)], gaps[int(len(gaps) * 0.99)]
@@ -575,8 +576,8 @@ class _PipeCapture(ScreenCapture):
         window = ideal / 4
         on_time = sum(1 for gap in gaps if abs(gap - ideal) <= window)
         doubled = sum(1 for gap in gaps if gap >= ideal * 1.75)   # a gap this long is a visibly held picture
-        return ("capture: Gleichmäßigkeit über %d Bilder - Abstand im Median %.1f ms (ideal %.1f), "
-                "90%% unter %.1f ms, 99%% unter %.1f ms; %.0f%% im Takt, %d sichtbare Hänger"
+        return ("capture: smoothness over %d pictures - median gap %.1f ms (ideal %.1f), "
+                "90%% under %.1f ms, 99%% under %.1f ms; %.0f%% on the cadence, %d visible hitches"
                 % (len(gaps), median, ideal, p90, p99, 100.0 * on_time / len(gaps), doubled))
 
     def stop(self) -> None:
@@ -614,8 +615,8 @@ class _PipeCapture(ScreenCapture):
         # split by kind: "44522 von der Quelle, 42548 an ffmpeg" read like 1974 lost pictures and was in fact
         # the over-rate branch eating generations (see the pacing note in feed()). Now every source picture is
         # accounted for - it went out, or a NEWER one took its place - and it is visible in the log.
-        log.write("capture: %s gestoppt (%d Bilder von der Quelle, %d an ffmpeg: %d neue, %d Wiederholungen, "
-                  "%d von einem neueren überholt%s)"
+        log.write("capture: %s stopped (%d pictures from the source, %d to ffmpeg: %d new, %d repeats, "
+                  "%d superseded by a newer one%s)"
                   % (self.name, self._source_frames, self._sent_frames, self._new_frames, self._repeat_frames,
                      self._skipped_frames,
                      ", %d Takte ausgelassen" % self._late_slots if self._late_slots else ""))
@@ -664,7 +665,7 @@ class _PipeCapture(ScreenCapture):
                     self._fresh.notify_all()   # feed() sends this picture at once - see the pacing note there
                 if self._source_frames == 1:
                     last_written, last_skipped = self._new_frames, self._skipped_frames
-                    log.write("capture: erstes Bild von der Quelle nach %d ms" % int((time.monotonic() - self._started_at) * 1000))
+                    log.write(_("capture: first picture from the source after %d ms") % int((time.monotonic() - self._started_at) * 1000))
                 window_frames += 1
                 now = published
                 if now - window_start >= 1.0:
@@ -675,13 +676,12 @@ class _PipeCapture(ScreenCapture):
                         # front is itself one of the things being tested (every redraw of it is another
                         # picture GNOME hands us). A log line can be read while the window is minimised.
                         written, skipped = self._new_frames, self._skipped_frames
-                        log.write("trace: Quelle %d/s, an ffmpeg %d neu, %d überholt"
-                                  % (window_frames, written - last_written, skipped - last_skipped))
+                        log.write(_("trace: source %d/s, to ffmpeg %d new, %d superseded") % (window_frames, written - last_written, skipped - last_skipped))
                         last_written, last_skipped = written, skipped
                     window_frames = 0
                     window_start = now
         except Exception as error:   # noqa: BLE001
-            log.write("capture: Lesefehler an der Quelle: %s" % error)
+            log.write(_("capture: read error at the source: %s") % error)
         finally:
             self.captured_fps = 0
             if not stop.is_set():
@@ -692,8 +692,8 @@ class _PipeCapture(ScreenCapture):
                 except subprocess.TimeoutExpired:
                     code = None
                 tail = self._stderr_tail.strip().splitlines()
-                log.write("capture: die Quelle liefert keine Bilder mehr (%s%s) - sende das letzte Bild weiter" % (
-                    GST_LAUNCH + (" beendet mit Code %d" % code if code is not None else " hängt"),
+                log.write(_("capture: the source delivers no more pictures (%s%s) - sending the last one on") % (
+                    GST_LAUNCH + (" exited with code %d" % code if code is not None else " is stuck"),
                     ": " + tail[-1] if tail else ""))
 
     def _run_drain(self, process: subprocess.Popen) -> None:
@@ -710,7 +710,7 @@ class _PipeCapture(ScreenCapture):
             for index in range(len(self._buffers)):
                 if index != self._latest and index != self._writing:
                     return index
-        raise RuntimeError("kein freier Bildpuffer")   # cannot happen with three buffers
+        raise RuntimeError("no free picture buffer")   # cannot happen with three buffers
 
     @staticmethod
     def _make_writer(target):
@@ -757,8 +757,8 @@ class PortalCapture(_PipeCapture):
         # 10 s meanwhile - each one a pump thread queued here. bound the wait, or the queue grows for as long
         # as the user is away (measured on the fake session; the same length as the dialog's own timeout)
         if not _portal_gate.acquire(timeout=PORTAL_GATE_WAIT_S):
-            log.write("portal: ein Freigabe-Dialog ist seit %d s offen und unbeantwortet - dieser Versuch entfällt" % int(PORTAL_GATE_WAIT_S))
-            raise portal.PortalError("Freigabe-Dialog noch offen")
+            log.write(_("portal: a sharing dialog has been open and unanswered for %d s - skipping this attempt") % int(PORTAL_GATE_WAIT_S))
+            raise portal.PortalError("sharing dialog still open")
         try:
             # read the token INSIDE the gate: warm_up() may be holding it while the user answers the first
             # dialog, and the token it saves must be the one we use - or a PLAY arriving meanwhile would show
@@ -827,11 +827,11 @@ class X11Capture(ScreenCapture):
     def start(self, width: int, height: int, fps: int) -> bool:
         self._display = os.environ.get("DISPLAY", "")
         if not self._display:
-            log.write("capture: x11grab braucht DISPLAY")
+            log.write(_("capture: x11grab needs DISPLAY"))
             return False
         self.fps = fps
         self.captured_fps = fps   # nominal: ffmpeg pulls at exactly this rate, we never see the frames
-        log.write("capture: x11grab auf %s (%d fps, skaliert auf %dx%d)" % (self._display, fps, width, height))
+        log.write(_("capture: x11grab on %s (%d fps, scaled to %dx%d)") % (self._display, fps, width, height))
         return True
 
     def ffmpeg_input_args(self) -> list[str]:
@@ -853,7 +853,7 @@ def _remember_token(saved: str | None, token: str | None) -> None:
     """Every Start hands out a fresh token and retires the old one, so the newest must always be saved."""
     if token and token != saved:
         settings.set("screencast_restore_token", token)
-        log.write("portal: Freigabe-Token gesichert - der Dialog erscheint erst wieder nach einem Widerruf")
+        log.write(_("portal: sharing token saved - the dialog only returns after it is revoked"))
 
 
 def create_capture() -> ScreenCapture | None:
@@ -864,7 +864,7 @@ def create_capture() -> ScreenCapture | None:
         return PortalCapture()
     if os.environ.get("DISPLAY"):
         return X11Capture()
-    log.write("capture: keine Bildschirmquelle (kein ScreenCast-Portal, kein DISPLAY)")
+    log.write(_("capture: no screen source (no ScreenCast portal, no DISPLAY)"))
     return None
 
 
@@ -881,13 +881,13 @@ def warm_up() -> None:
         # dialog itself and saved the token - asking now would put the same dialog up a second time
         if settings.get("screencast_restore_token"):
             return
-        log.write("portal: erste Einrichtung - der Freigabe-Dialog fragt einmalig, welcher Monitor zur PS3 gestreamt wird")
+        log.write(_("portal: first-time setup - the sharing dialog asks once which monitor is streamed to the PS3"))
         session = portal.ScreenCastSession()
         try:
             _node_id, token = session.open(None)
             _remember_token(None, token)
             if not token:
-                log.write("portal: das Portal gab keinen Token heraus - der Dialog erscheint bei jedem Stream")
+                log.write(_("portal: the portal handed out no token - the dialog will appear on every stream"))
         except portal.PortalError:
             pass   # already logged; the dialog comes back at the next PLAY
         finally:

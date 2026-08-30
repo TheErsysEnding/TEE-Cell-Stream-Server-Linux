@@ -13,6 +13,7 @@ import struct
 
 from . import log, protocol
 from .clock import now_us, sleep_until_us
+from .i18n import _
 
 FRAGMENT_PAYLOAD_BYTES = protocol.FRAGMENT_PAYLOAD_BYTES
 FRAGMENT_HEADER_BYTES = protocol.FRAGMENT_HEADER_BYTES
@@ -61,8 +62,7 @@ def send_access_unit(sock, target: tuple[str, int], frame_id: int, data, keyfram
     if length > MAX_UNIT_BYTES:
         if not _oversize_reported:
             _oversize_reported = True
-            log.write("live: Frame %d mit %d Bytes überschreitet das PS3-Limit von %d Bytes - verworfen"
-                      % (frame_id & 0xFFFFFFFF, length, MAX_UNIT_BYTES))
+            log.write(_("live: frame %d at %d bytes exceeds the PS3 limit of %d bytes - dropped") % (frame_id & 0xFFFFFFFF, length, MAX_UNIT_BYTES))
         return
     frame_id &= 0xFFFFFFFF                       # the wire field is u32; the pump's counter simply wraps
     capture_us &= 0xFFFFFFFFFFFFFFFF
@@ -206,9 +206,9 @@ class AnnexBSplitter:
         only ever sees what came out. Bytes per picture is the second half of the trade - more slices cost
         bits, because nothing may be predicted across a slice boundary and each one carries its own header."""
         if not self._pictures:
-            return "sender: keine Bilder gesendet"
+            return "sender: no pictures sent"
         order = sorted(self._slices_seen.items(), key=lambda item: -item[1])
-        spread = ", ".join("%d Slices (%dx)" % (slices, pictures) for slices, pictures in order)
+        spread = ", ".join("%d slices (%dx)" % (slices, pictures) for slices, pictures in order)
         average = self._picture_bytes / self._pictures
-        return ("sender: %d Bilder gesendet, %s, Ø %.1f KB je Bild = %.1f Fragmente"
+        return ("sender: %d pictures sent, %s, %.1f KB per picture on average = %.1f fragments"
                 % (self._pictures, spread, average / 1024.0, average / FRAGMENT_PAYLOAD_BYTES))

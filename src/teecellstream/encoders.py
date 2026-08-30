@@ -13,6 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from . import childproc, log, protocol
+from .i18n import _
 
 PROBE_TIMEOUT_S = 15
 VAAPI_DEVICE = "/dev/dri/renderD128"
@@ -54,14 +55,14 @@ LADDER: list[VideoEncoder] = [
     VideoEncoder("vaapi", "Intel/AMD GPU (VA-API)",
                  _PROBE_HEAD + ["-vaapi_device", VAAPI_DEVICE] + _PROBE_SOURCE
                  + ["-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-f", "null", "-"], False),
-    VideoEncoder("x264", "CPU (x264 – weniger fps möglich)",
+    VideoEncoder("x264", "CPU (x264 – fewer fps possible)",
                  _PROBE_HEAD + _PROBE_SOURCE + ["-c:v", "libx264", "-f", "null", "-"], True),
 ]
 
 
 def detect_available(ffmpeg_path: str) -> list[VideoEncoder]:
     available = [encoder for encoder in LADDER if _can_run(ffmpeg_path, encoder)]
-    log.write("encoders: keiner funktioniert auf diesem PC" if not available
+    log.write("encoders: none of them works on this PC" if not available
               else "encoders: " + ", ".join(encoder.name for encoder in available))
     return available
 
@@ -71,7 +72,7 @@ def _can_run(ffmpeg_path: str, encoder: VideoEncoder) -> bool:
         probe = childproc.popen([ffmpeg_path] + encoder.probe_args,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as error:
-        log.write("encoders: konnte %s nicht testen: %s" % (encoder.name, error))
+        log.write(_("encoders: could not test %s: %s") % (encoder.name, error))
         return False
     try:
         # read both pipes to the end: a probe that fills its pipe would otherwise hang
@@ -79,7 +80,7 @@ def _can_run(ffmpeg_path: str, encoder: VideoEncoder) -> bool:
     except subprocess.TimeoutExpired:
         probe.kill()
         probe.communicate()
-        log.write("encoders: %s antwortet nicht (Timeout nach %d s)" % (encoder.name, PROBE_TIMEOUT_S))
+        log.write(_("encoders: %s does not answer (timed out after %d s)") % (encoder.name, PROBE_TIMEOUT_S))
         return False
     if probe.returncode == 0:
         return True
@@ -87,7 +88,7 @@ def _can_run(ffmpeg_path: str, encoder: VideoEncoder) -> bool:
     # hardware the PC lacks is expected to fail here - but so is a too-old driver, and that one a user
     # needs told. log the reason (first real line of ffmpeg's output) so it isn't a silent no.
     error_text = error_bytes.decode("utf-8", "replace")
-    log.write("encoders: %s nicht verfügbar%s" % (encoder.name, _describe_probe_failure(error_text)))
+    log.write(_("encoders: %s not available%s") % (encoder.name, _describe_probe_failure(error_text)))
     return False
 
 
@@ -130,7 +131,7 @@ def save_choice(encoder: VideoEncoder, settings) -> None:
     try:
         settings.set("encoder", encoder.kind)
     except Exception as error:   # noqa: BLE001
-        log.write("encoders: konnte die Wahl nicht merken: %s" % error)
+        log.write(_("encoders: could not remember the choice: %s") % error)
 
 
 def intra_refresh_enabled(encoder: VideoEncoder | None, loss_recovery: str) -> bool:

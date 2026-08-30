@@ -457,9 +457,9 @@ class LiveStreamerTests(unittest.TestCase):
 
         recent = log.get_recent()
         self.assertIn("live: versuche Encoder " + self.best.name, recent)
-        self.assertRegex(recent, r"live: erstes Frame \d+ ms nach Encoder-Start gesendet")
-        self.assertRegex(recent, r"live: \d+ Frames gesendet")
-        self.assertIn("live: Stream an 127.0.0.1:%d beendet" % self.target[1], recent)
+        self.assertRegex(recent, r"live: first frame sent \d+ ms after the encoder started")
+        self.assertRegex(recent, r"live: \d+ frames sent")
+        self.assertIn("live: stream to 127.0.0.1:%d ended" % self.target[1], recent)
         self.assertEqual(self.failures, [])
 
     # the same path through the real capture.py test backend (what the integration run uses)
@@ -481,9 +481,9 @@ class LiveStreamerTests(unittest.TestCase):
         self.assertEqual(frames.incomplete, 0)
         self.assertEqual(childproc.children(), [], "Kindprozesse übrig")
         recent = log.get_recent()
-        self.assertIn("capture: test gestartet", recent)
-        self.assertIn("capture: sende Bilder an ffmpeg", recent)
-        self.assertIn("capture: test gestoppt", recent)
+        self.assertIn("capture: test started", recent)
+        self.assertIn("capture: sending pictures to ffmpeg", recent)
+        self.assertIn("capture: test stopped", recent)
         self.assertEqual(self.failures, [])
 
     # (4) the PS3 repeats PLAY until SINFO arrives: answer, never restart
@@ -531,7 +531,7 @@ class LiveStreamerTests(unittest.TestCase):
         streamer.stop()
         recent = log.get_recent()
         self.assertEqual(recent.count("live: versuche Encoder") - before, 2)
-        self.assertIn("live: Stream an 127.0.0.1:%d beendet" % self.target[1], recent)
+        self.assertIn("live: stream to 127.0.0.1:%d ended" % self.target[1], recent)
         self.assertEqual(self.failures, [])
 
     # the PS3's link drops (ENETUNREACH on sendto): log once, carry on - the pump must not die with
@@ -561,7 +561,7 @@ class LiveStreamerTests(unittest.TestCase):
         self.assertIn(15, ids, "nach dem Ausfall ging es nicht weiter")
         self.assertGreater(max(ids), 40)
         streamer.stop()
-        self.assertEqual(log.get_recent().count("live: Senden an 127.0.0.1 fehlgeschlagen: [Errno %d] Network is unreachable"
+        self.assertEqual(log.get_recent().count("live: sending to 127.0.0.1 failed: [Errno %d] Network is unreachable"
                                                % errno.ENETUNREACH), 1, "genau ein Log-Eintrag für den Sendefehler")
         self.assertEqual(self.failures, [])
 
@@ -575,11 +575,11 @@ class LiveStreamerTests(unittest.TestCase):
             if attempt < 3:
                 self.assertEqual(self.failures, [], "Sicherung zu früh ausgelöst (Versuch %d)" % attempt)
         self.assertEqual(len(self.failures), 1)
-        self.assertIn("kein Encoder startet", self.failures[0])
+        self.assertIn("no encoder starts", self.failures[0])
         self.assertIn("3-mal in Folge", self.failures[0])
         recent = log.get_recent()
         self.assertIn("live: versuche Encoder Kaputt (Test)", recent)
-        self.assertIn("live: Encoder lieferte keine Frames. ffmpeg sagte:", recent)
+        self.assertIn("live: the encoder produced no frames. ffmpeg said:", recent)
         self.assertIn("tee-cst-no-such-input", recent, "ffmpegs Fehlertext fehlt im Log")
         self.assertEqual(childproc.children(), [])
 
@@ -625,7 +625,7 @@ class LiveStreamerTests(unittest.TestCase):
             streamer.start(self.target)
             self._wait_until_idle()
         self.assertEqual(len(self.failures), 1)
-        self.assertIn("Bildschirmaufnahme startet nicht", self.failures[0])
+        self.assertIn("the screen capture does not start", self.failures[0])
         # one attempt per PLAY: a dead capture is not retried on the next encoder
         self.assertEqual(log.get_recent().count("live: versuche Encoder") - before, 3)
 
@@ -648,7 +648,7 @@ class LiveStreamerTests(unittest.TestCase):
         self.assertIn(60, keyframe_ids, "der Ersatz-Encoder muss im Keyframe-Modus laufen, wie angekündigt: %r" % keyframe_ids[:5])
         recent = log.get_recent()
         self.assertIn("live: versuche Encoder " + vaapi.name, recent)
-        self.assertIn("live: Encoder lieferte keine Frames", recent)
+        self.assertIn("live: the encoder produced no frames", recent)
         self.assertIn("live: versuche Encoder " + self.best.name, recent)
         self.assertEqual(childproc.children(), [])
         self.assertEqual(self.failures, [])
@@ -670,18 +670,18 @@ class LiveStreamerTests(unittest.TestCase):
         broken = encoders.VideoEncoder("x264", "Kaputt (Test)", [], True)
         FailFastThenSlowCapture.starts = 0
         streamer = self._make([broken, broken], create_capture=FailFastThenSlowCapture)
-        before = log.get_recent().count("live: Encoder lieferte keine Frames")
+        before = log.get_recent().count("live: the encoder produced no frames")
         for attempt in (1, 2, 3):
             streamer.start(self.target)
             deadline = time.monotonic() + 5.0
-            while log.get_recent().count("live: Encoder lieferte keine Frames") < before + attempt and time.monotonic() < deadline:
+            while log.get_recent().count("live: the encoder produced no frames") < before + attempt and time.monotonic() < deadline:
                 time.sleep(0.02)
             time.sleep(0.2)   # the second rung is now inside its (slow) capture start
             streamer.stop()
             self._wait_until_idle()
             self.assertEqual(streamer._failed_starts, attempt)   # only the server's re-arm resets it
         self.assertEqual(len(self.failures), 1)
-        self.assertIn("kein Encoder startet", self.failures[0])
+        self.assertIn("no encoder starts", self.failures[0])
 
     # a pump that dies from an unexpected error must not leave ffmpeg or the capture (gst-launch, the
     # share session) behind - nothing else would ever stop them
@@ -699,7 +699,7 @@ class LiveStreamerTests(unittest.TestCase):
         self._wait_until_idle()
         pump.join(5.0)
         self.assertFalse(pump.is_alive())
-        self.assertIn("live: Pumpe abgebrochen: RuntimeError('boom (Test)')", log.get_recent())
+        self.assertIn("live: the pump aborted: RuntimeError('boom (Test)')", log.get_recent())
         self.assertEqual(childproc.children(), [], "gst-launch blieb übrig")
         self.assertFalse(any(thread.name.startswith("test-capture") for thread in threading.enumerate()))
         self.assertEqual(self.failures, [])
@@ -857,7 +857,7 @@ class LiveStreamerTests(unittest.TestCase):
                            "zu früh abgebrochen (%.1f s)" % took)
         self.assertLess(took, live_streamer_module.FIRST_FRAME_TIMEOUT_S + 6.0,
                         "der Abbruch dauerte %.1f s" % took)
-        self.assertIn("live: Encoder lieferte keine Frames", log.get_recent())
+        self.assertIn("live: the encoder produced no frames", log.get_recent())
         self.assertEqual(streamer._failed_starts, 1)
         self.assertEqual(childproc.children(), [], "ffmpeg blieb hängen")
         self.assertEqual(self.failures, [])
@@ -881,7 +881,7 @@ class LiveStreamerTests(unittest.TestCase):
         self.assertIsNone(_process_state(gst_pid), "gst-launch überlebte den Tod von ffmpeg")
         self.assertEqual(streamer._failed_starts, 0)
         self.assertEqual(self.failures, [])
-        self.assertRegex(log.get_recent(), r"live: \d+ Frames gesendet")
+        self.assertRegex(log.get_recent(), r"live: \d+ frames sent")
 
 
 class AnnouncedLevel(unittest.TestCase):

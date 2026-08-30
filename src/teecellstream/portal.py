@@ -15,6 +15,7 @@ import random
 import threading
 
 from . import log
+from .i18n import _
 
 try:
     import gi
@@ -132,16 +133,16 @@ class ScreenCastSession:
         """
         self._bus = _session_bus()
         if self._bus is None:
-            log.write("portal: kein Session-Bus - keine Bildschirmfreigabe möglich")
-            raise PortalError("kein Session-Bus")
+            log.write(_("portal: no session bus - screen sharing is not possible"))
+            raise PortalError("no session bus")
 
         session_token = _new_token()
         results = self._request("CreateSession", [], {"session_handle_token": GLib.Variant("s", session_token)},
                                 timeout_s)
         self.session_handle = results.get("session_handle")
         if not isinstance(self.session_handle, str) or not self.session_handle:
-            log.write("portal: CreateSession lieferte keine Sitzung")
-            raise PortalError("CreateSession ohne session_handle")
+            log.write(_("portal: CreateSession returned no session"))
+            raise PortalError("CreateSession without a session_handle")
 
         options = {
             "types": GLib.Variant("u", SOURCE_TYPE_MONITOR),
@@ -151,33 +152,33 @@ class ScreenCastSession:
         }
         if restore_token:
             options["restore_token"] = GLib.Variant("s", restore_token)
-            log.write("portal: frage die Bildschirmfreigabe mit dem gespeicherten Token an")
+            log.write(_("portal: requesting screen sharing with the saved token"))
         else:
-            log.write("portal: Freigabe-Dialog wird angezeigt - bitte den Monitor auswählen und freigeben")
+            log.write(_("portal: the sharing dialog is up - please pick the monitor and allow it"))
         self._request("SelectSources", [GLib.Variant("o", self.session_handle)], options, timeout_s)
 
         results = self._request("Start", [GLib.Variant("o", self.session_handle), GLib.Variant("s", "")], {}, timeout_s)
         streams = results.get("streams") or []
         if not streams:
-            log.write("portal: Freigabe gestartet, aber ohne Stream")
-            raise PortalError("Start ohne streams")
+            log.write(_("portal: sharing started, but with no stream"))
+            raise PortalError("Start without streams")
         self.node_id = int(streams[0][0])
         token = results.get("restore_token")
         self.restore_token = token if isinstance(token, str) and token else None
-        log.write("portal: Bildschirmfreigabe läuft (PipeWire-Node %d%s)" % (self.node_id, ", ohne Token" if self.restore_token is None else ""))
+        log.write(_("portal: screen sharing is running (PipeWire node %d%s)") % (self.node_id, ", without a token" if self.restore_token is None else ""))
         return self.node_id, self.restore_token
 
     def open_pipewire_remote(self) -> int:
         """The PipeWire connection fd for this session. The caller owns (and must close) it."""
         if self.session_handle is None:
-            raise PortalError("keine Sitzung")
+            raise PortalError("no session")
         try:
             reply, fd_list = self._bus.call_with_unix_fd_list_sync(
                 PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, SCREENCAST_INTERFACE, "OpenPipeWireRemote",
                 GLib.Variant("(oa{sv})", (self.session_handle, {})), GLib.VariantType("(h)"),
                 Gio.DBusCallFlags.NONE, CALL_TIMEOUT_MS, None, None)
         except GLib.Error as error:
-            log.write("portal: OpenPipeWireRemote fehlgeschlagen: %s" % error.message)
+            log.write(_("portal: OpenPipeWireRemote failed: %s") % error.message)
             raise PortalError("OpenPipeWireRemote: " + error.message) from error
         index = reply.unpack()[0]
         fd = fd_list.get(index)   # get() hands back a dup that is ours to close
@@ -193,9 +194,9 @@ class ScreenCastSession:
         try:
             self._bus.call_sync(PORTAL_BUS_NAME, self.session_handle, SESSION_INTERFACE, "Close", None, None,
                                 Gio.DBusCallFlags.NONE, CLOSE_TIMEOUT_MS, None)
-            log.write("portal: Sitzung geschlossen")
+            log.write(_("portal: session closed"))
         except GLib.Error as error:
-            log.write("portal: Sitzung ließ sich nicht schließen: %s" % error.message)
+            log.write(_("portal: the session would not close: %s") % error.message)
 
     # ------------------------------------------------------------------ request/response plumbing
 
@@ -240,7 +241,7 @@ class ScreenCastSession:
                 reply = self._bus.call_sync(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, SCREENCAST_INTERFACE, method, parameters,
                                             GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, CALL_TIMEOUT_MS, None)
             except GLib.Error as error:
-                log.write("portal: %s fehlgeschlagen: %s" % (method, error.message))
+                log.write(_("portal: %s failed: %s") % (method, error.message))
                 raise PortalError(method + ": " + error.message) from error
             actual_path = reply.unpack()[0]
             if actual_path != expected_path:
@@ -265,16 +266,16 @@ class ScreenCastSession:
             context.pop_thread_default()
 
         if "code" not in outcome:
-            log.write("portal: keine Antwort auf %s nach %d s - Dialog abgebrochen" % (method, int(timeout_s)))
+            log.write(_("portal: no answer to %s after %d s - dialog abandoned") % (method, int(timeout_s)))
             for path in request_paths:   # the portal may have named the request itself; close whichever exists
                 self._close_request(path)
-            raise PortalError("%s: keine Antwort nach %d s" % (method, int(timeout_s)))
+            raise PortalError("%s: no answer after %d s" % (method, int(timeout_s)))
         code = outcome["code"]
         if code == RESPONSE_CANCELLED:
-            log.write("portal: der Nutzer hat die Bildschirmfreigabe abgebrochen")
-            raise PortalCancelled("Bildschirmfreigabe abgebrochen")
+            log.write(_("portal: the user cancelled screen sharing"))
+            raise PortalCancelled("screen sharing cancelled")
         if code != RESPONSE_SUCCESS:
-            log.write("portal: Bildschirmfreigabe fehlgeschlagen (%s meldet Code %d)" % (method, code))
+            log.write(_("portal: screen sharing failed (%s reports code %d)") % (method, code))
             raise PortalError("%s: Antwortcode %d" % (method, code))
         results = outcome.get("results")
         return results if isinstance(results, dict) else {}

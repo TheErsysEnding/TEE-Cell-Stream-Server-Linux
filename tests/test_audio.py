@@ -217,8 +217,8 @@ class SourceChoiceTest(unittest.TestCase):
                              "with no playback device every magic name resolves to a capture device")
             self.assertFalse(capture.start())
         text = _log_text()[log_before:]
-        self.assertIn("audio: keine Monitor-Quelle vorhanden (kein Wiedergabegerät), streame nur Video", text)
-        self.assertNotIn("nehme die Lautsprecher auf", text)
+        self.assertIn("audio: no monitor source present (no playback device), streaming video only", text)
+        self.assertNotIn("capturing the speakers", text)
 
     def test_named_monitors_are_appended_behind_the_magic_names(self):
         capture = audio.AudioCapture("/nonexistent/tee-ffmpeg")
@@ -264,7 +264,7 @@ class RingTest(unittest.TestCase):
         self.assertEqual(self.capture.buffered_frames, 5)
 
     def test_latency_guard_trims_to_20ms_once_over_60ms(self):
-        before = _log_text().count("Latenzschutz")
+        before = _log_text().count("latency guard")
         for _ in range(7):                                  # 7 x 10ms = 70ms > 60ms
             self.capture._write(bytes(480 * 4))
         self.assertEqual(self.capture.buffered_frames, 960)   # back to 20ms
@@ -272,7 +272,7 @@ class RingTest(unittest.TestCase):
         for _ in range(5):                                  # trips again ...
             self.capture._write(bytes(480 * 4))
         self.assertEqual(self.capture.buffered_frames, 960)
-        self.assertEqual(_log_text().count("Latenzschutz"), before + 1)   # ... but logs only once per session
+        self.assertEqual(_log_text().count("latency guard"), before + 1)   # ... but logs only once per session
 
     def test_buffer_never_exceeds_guard_between_writes(self):
         for _ in range(6):
@@ -300,7 +300,7 @@ class RingTest(unittest.TestCase):
         original = audio.log.write
 
         def spy(message):
-            if "Latenzschutz" in message:
+            if "latency guard" in message:
                 free = self.capture._ring_gate.acquire(blocking=False)
                 seen.append(free)
                 if free:
@@ -364,7 +364,7 @@ class CaptureTest(unittest.TestCase):
         self.assertGreater(self.capture.dropped_frames, 0)     # the guard trimmed (PipeWire streams even silence)
         data = self.capture.read(240)
         self.assertEqual(len(data), 960)
-        self.assertIn("nehme die Lautsprecher auf", _log_text())
+        self.assertIn("capturing the speakers", _log_text())
 
     def test_real_capture_delivers_48000_frames_per_second(self):
         self.assertTrue(self.capture.start())
@@ -405,7 +405,7 @@ class CaptureTest(unittest.TestCase):
         self.assertGreaterEqual(elapsed, audio.START_TIMEOUT_S)
         self.assertLess(elapsed, audio.START_TIMEOUT_S + 2.5)
         text = _log_text()
-        self.assertIn("tee-hang-source startet nicht (keine Daten innerhalb 3.0s), versuche @DEFAULT_MONITOR@", text)
+        self.assertIn("tee-hang-source does not start (no data within 3.0s), trying @DEFAULT_MONITOR@", text)
         time.sleep(0.2)
         self.assertGreater(capture.buffered_frames, 0)
         self.assertTrue(capture.is_capturing)
@@ -420,7 +420,7 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(capture.source, "@DEFAULT_MONITOR@")
         self.assertLess(elapsed, 2.0, "an early exit must not wait out the start timeout")
         text = _log_text()
-        self.assertIn("tee-exit-source startet nicht (ffmpeg beendet mit 1, tee: kaputt), versuche @DEFAULT_MONITOR@", text)
+        self.assertIn("tee-exit-source does not start (ffmpeg exited with 1, tee: kaputt), trying @DEFAULT_MONITOR@", text)
 
     def test_a_list_of_hanging_sources_does_not_multiply_the_stall(self):
         # start() runs on server.py's receive thread under the stream lock: while it waits, the PS3's pad,
@@ -452,9 +452,9 @@ class CaptureTest(unittest.TestCase):
         self.assertIsNone(self.capture.source)
         self.assertFalse(self.capture.is_capturing)
         text = _log_text()
-        self.assertIn("audio: konnte die Lautsprecher nicht öffnen, streame nur Video (@DEFAULT_MONITOR@: ffmpeg beendet mit", text)
+        self.assertIn("audio: could not open the speakers, streaming video only (@DEFAULT_MONITOR@: ffmpeg exited with", text)
         # ffmpeg's last words are in the log (the exact wording is ffmpeg's: "No such process" on 8.0.1)
-        self.assertRegex(text, r"@DEFAULT_MONITOR@: ffmpeg beendet mit \d+, \S.*; @DEFAULT_SINK@\.monitor: ffmpeg beendet mit \d+, \S")
+        self.assertRegex(text, r"@DEFAULT_MONITOR@: ffmpeg exited with \d+, \S.*; @DEFAULT_SINK@\.monitor: ffmpeg exited with \d+, \S")
         self.assertEqual(self.capture.read(240), bytes(960))
 
 
@@ -593,8 +593,8 @@ class StreamerTest(unittest.TestCase):
             self.assertEqual(info, b"AINFO 48000 2")
 
         text = _log_text()
-        self.assertIn("audio: streame 48000Hz Stereo an 127.0.0.1:%d (1536kbps)" % self.target[1], text)
-        self.assertIn("Pakete gesendet", text)
+        self.assertIn("audio: streaming 48000Hz stereo to 127.0.0.1:%d (1536kbps)" % self.target[1], text)
+        self.assertIn("packets sent", text)
 
     def test_repeated_play_from_same_target_does_not_restart(self):
         self.streamer.start(self.target)
@@ -614,7 +614,7 @@ class StreamerTest(unittest.TestCase):
         while self.streamer.is_streaming and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertFalse(self.streamer.is_streaming)
-        self.assertIn("audio: Senden abgebrochen", _log_text())
+        self.assertIn("audio: sending aborted", _log_text())
         # the same PS3 (same port) sends PLAY again: that is a new session now, not a repeat to ignore
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.server_sock.bind(("127.0.0.1", 0))
@@ -691,7 +691,7 @@ class StreamerTest(unittest.TestCase):
             if data[:2] == b"AF" and struct.unpack(">Q", data[8:16])[0] > killed_at_us + 100_000:
                 fresh += 1
         self.assertGreater(fresh, 30, "packets must keep coming after the capture died")
-        self.assertIn("audio: Aufnahme abgebrochen (ffmpeg weg", _log_text())
+        self.assertIn("audio: capture aborted (ffmpeg gone", _log_text())
         started = time.monotonic()
         self.streamer.stop()
         self.assertLess(time.monotonic() - started, 1.0)
@@ -733,7 +733,7 @@ class StreamerTest(unittest.TestCase):
         self.assertIsNone(self.streamer._send_thread)
         self.assertFalse(self.streamer.capture.is_capturing)
         self.assertEqual(childproc.children(), [], "the capture's ffmpeg must not be left running")
-        self.assertIn("audio: Sende-Thread startet nicht, streame nur Video", _log_text())
+        self.assertIn("audio: the sending thread will not start, streaming video only", _log_text())
         self.streamer.start(self.target)          # and the next PLAY still works
         self.assertTrue(self.streamer.is_streaming)
 
@@ -781,7 +781,7 @@ class StreamerWithoutCaptureTest(unittest.TestCase):
             with self.assertRaises(socket.timeout):
                 receiver.recvfrom(4096)
             text = _log_text()[log_before:]              # only what this start() wrote
-            self.assertIn("audio: ffmpeg lässt sich nicht starten, streame nur Video", text)
+            self.assertIn("audio: ffmpeg will not start, streaming video only", text)
             self.assertNotIn("versuche default", text, "a missing binary is not a source problem: no fallback round")
             streamer.stop()                              # idempotent, harmless
         finally:

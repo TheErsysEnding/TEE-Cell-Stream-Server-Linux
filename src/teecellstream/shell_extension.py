@@ -15,6 +15,7 @@ say so, once, instead of leaving them with a frozen picture and no explanation.
 from gi.repository import Gio, GLib
 
 from . import log
+from .i18n import _
 
 UUID = "tee-cell-stream-scanout@tee.local"
 
@@ -44,22 +45,22 @@ def ensure_enabled() -> str:
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     except GLib.Error as error:
-        log.write("extension: kein Session-Bus (%s)" % error.message)
+        log.write(_("extension: no session bus (%s)") % error.message)
         return UNAVAILABLE
 
     try:
         reply = _call(bus, "GetExtensionInfo", GLib.Variant("(s)", (UUID,)), "(a{sv})")
     except GLib.Error as error:
         # no GNOME Shell (another desktop) is normal and not worth alarming anybody about
-        log.write("extension: GNOME Shell nicht erreichbar (%s)" % error.message)
+        log.write(_("extension: GNOME Shell not reachable (%s)") % error.message)
         return UNAVAILABLE
 
     info = reply.unpack()[0]
     if not info:
         # the shell has no record of it: installed after this session started
-        log.write("extension: die mitgelieferte GNOME-Erweiterung ist noch nicht eingelesen - einmal ab- und "
-                  "anmelden, dann schaltet sie sich von selbst ein. Bis dahin friert das Bild ein, sobald ein "
-                  "Spiel im Vollbild läuft (randloses Fenster hilft solange).")
+        log.write("extension: the bundled GNOME extension has not been read yet - log out and in "
+                  "once, then it enables itself. Until then the picture freezes as soon as a "
+                  "game runs full-screen (a borderless window helps in the meantime).")
         return NEEDS_LOGOUT
 
     if info.get("enabled") and int(info.get("state", 0)) == STATE_ENABLED:
@@ -68,12 +69,12 @@ def ensure_enabled() -> str:
     try:
         reply = _call(bus, "EnableExtension", GLib.Variant("(s)", (UUID,)), "(b)")
     except GLib.Error as error:
-        log.write("extension: konnte die GNOME-Erweiterung nicht einschalten (%s)" % error.message)
+        log.write(_("extension: could not enable the GNOME extension (%s)") % error.message)
         return FAILED
 
     if not reply.unpack()[0]:
-        log.write("extension: GNOME hat das Einschalten der Erweiterung abgelehnt")
+        log.write(_("extension: GNOME refused to enable the extension"))
         return FAILED
 
-    log.write("extension: GNOME-Erweiterung eingeschaltet - Vollbild-Spiele frieren jetzt nicht mehr ein")
+    log.write(_("extension: GNOME extension enabled - full-screen games no longer freeze"))
     return ENABLED

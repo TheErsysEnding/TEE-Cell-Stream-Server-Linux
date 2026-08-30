@@ -32,6 +32,7 @@ except ImportError:
 from . import log
 from .protocol import PadBits
 from .virtual_gamepad import EV_KEY, node_path, open_uinput
+from .i18n import _
 
 # the sticks rest slightly off centre once a pad has some age on it (the PS3's reads -6 at rest), and
 # without a dead zone that drifts the pointer across the screen on its own
@@ -266,10 +267,10 @@ def build_key_table(layout: str, variant: str | None = None) -> KeyTable:
     each produces. Raises OSError when libxkbcommon is missing or the layout does not compile."""
     lib = _xkbcommon()
     if lib is None:
-        raise OSError("libxkbcommon fehlt")
+        raise OSError("libxkbcommon is missing")
     context = lib.xkb_context_new(0)
     if not context:
-        raise OSError("xkb_context_new fehlgeschlagen")
+        raise OSError("xkb_context_new failed")
     if hasattr(lib, "xkb_context_set_log_level"):
         # a layout that does not compile is reported through our own log; the library's own stderr
         # commentary (a dozen lines per attempt) would only land in the journal
@@ -278,7 +279,7 @@ def build_key_table(layout: str, variant: str | None = None) -> KeyTable:
         names = _RuleNames(None, None, layout.encode("utf-8"), variant.encode("utf-8") if variant else None, None)
         keymap = lib.xkb_keymap_new_from_names(context, ctypes.byref(names), 0)
         if not keymap:
-            raise OSError("Layout %r%s lässt sich nicht übersetzen" % (layout, "(%s)" % variant if variant else ""))
+            raise OSError("layout %r%s cannot be translated" % (layout, "(%s)" % variant if variant else ""))
         try:
             table = KeyTable(layout, variant, "libxkbcommon")
             syms = ctypes.POINTER(ctypes.c_uint32)()
@@ -343,7 +344,7 @@ def get_key_table(layout: str | None = None, variant: str | None = None) -> KeyT
                 table = us_fallback_table()
         else:
             table = us_fallback_table()
-        complaint = "pad: Tastaturlayout %s nicht ladbar (%s) - nehme %s" % (layout, error, table.describe())
+        complaint = "pad: keyboard layout %s cannot be loaded (%s) - using %s" % (layout, error, table.describe())
     with _tables_gate:
         # the warm-up thread and the first KEY packet can both land here; only whoever fills the cache says so
         first = key not in _tables
@@ -368,7 +369,7 @@ def _keyboard_codes() -> list[int]:
 def open_uinput_devices():
     """The virtual mouse and keyboard. Raises with a readable reason when uinput is not available."""
     if evdev is None:
-        raise OSError("python3-evdev fehlt")
+        raise OSError("python3-evdev is missing")
     mouse = open_uinput({EV_KEY: [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE], EV_REL: [REL_X, REL_Y, REL_WHEEL, REL_WHEEL_HI_RES]},
                         MOUSE_NAME, VENDOR_ID, MOUSE_PRODUCT_ID, 1, BUS_VIRTUAL)
     try:
@@ -427,11 +428,11 @@ class DesktopInput:
             self._mouse, self._keyboard = self._open_devices()
         except Exception as error:   # noqa: BLE001 - whatever uinput's complaint is, say it once and carry on
             self._open_failed = True
-            log.write("pad: uinput nicht verfügbar (%s) - Maus/Tastatur-Steuerung aus" % error)
+            log.write(_("pad: uinput not available (%s) - mouse/keyboard control off") % error)
             return False
         self._write_failed = False
         paths = self.device_paths
-        log.write("pad: Maus und Tastatur (uinput) angelegt" +
+        log.write("pad: mouse and keyboard (uinput) created" +
                   (" (%s, %s)" % paths if paths[0] and paths[1] else ""))
         # the layout table costs a gsettings call and a keymap compile (measured 5 ms + 4 ms). Build it
         # now, beside the packet path, so the first KEY packet - which arrives on the receive thread,
@@ -455,7 +456,7 @@ class DesktopInput:
         except OSError as error:
             if not self._write_failed:
                 self._write_failed = True
-                log.write("pad: Eingabe an uinput fehlgeschlagen: %s" % error)
+                log.write(_("pad: input to uinput failed: %s") % error)
 
     def apply(self, buttons: int, left_x: int, left_y: int, right_x: int, right_y: int) -> None:
         with self._gate:
@@ -516,7 +517,7 @@ class DesktopInput:
     def _type_via_layout(self, character: str) -> None:
         if self._table is None:
             self._table = get_key_table(self._layout, self._variant)
-            log.write("pad: Tastaturlayout " + self._table.describe())
+            log.write(_("pad: keyboard layout ") + self._table.describe())
         entry = self._table.lookup(character)
         via_dead_key = entry is None
         if via_dead_key:
@@ -524,7 +525,7 @@ class DesktopInput:
         if entry is None:
             if character not in self._unknown_logged:
                 self._unknown_logged.add(character)
-                log.write("pad: kein Tastencode für %r im Layout %s - ignoriert" % (character, self._table.layout))
+                log.write(_("pad: no key code for %r in layout %s - ignored") % (character, self._table.layout))
             return
         code, level = entry
         modifiers = []
@@ -589,7 +590,7 @@ class DesktopInput:
                 except OSError:
                     pass
             self._mouse = self._keyboard = None
-            log.write("pad: Maus und Tastatur (uinput) entfernt")
+            log.write(_("pad: mouse and keyboard (uinput) removed"))
 
 
 def apply_dead_zone(value: int) -> int:

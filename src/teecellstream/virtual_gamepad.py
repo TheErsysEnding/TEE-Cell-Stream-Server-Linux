@@ -22,6 +22,7 @@ except ImportError:                 # python3-evdev is a package dependency; wit
 
 from . import log
 from .protocol import PadBits
+from .i18n import _
 
 DEVICE_NAME = "Microsoft X-Box 360 pad"
 VENDOR_ID = 0x045E
@@ -112,7 +113,7 @@ if evdev is not None:
 def open_uinput(events: dict, name: str, vendor: int, product: int, version: int, bustype: int):
     """Creates a uinput device. Raises OSError/UInputError with a readable reason when it cannot."""
     if evdev is None:
-        raise OSError("python3-evdev fehlt")
+        raise OSError("python3-evdev is missing")
     return _WriteOnlyUInput(events, name=name, vendor=vendor, product=product, version=version, bustype=bustype)
 
 
@@ -150,18 +151,18 @@ class VirtualGamepad:
             if self._device is not None:
                 return True
             if evdev is None:
-                log.write("pad: python3-evdev fehlt - kein virtuelles Gamepad möglich")
+                log.write(_("pad: python3-evdev is missing - no virtual gamepad possible"))
                 return False
             try:
                 device = open_uinput(capabilities(), DEVICE_NAME, VENDOR_ID, PRODUCT_ID, VERSION, BUS_USB)
             except Exception as error:   # noqa: BLE001 - UInputError, PermissionError, FileNotFoundError ...
-                log.write("pad: virtuelles Gamepad konnte nicht angelegt werden: %s "
-                          "(uinput-Modul geladen und /dev/uinput beschreibbar?)" % error)
+                log.write("pad: could not create the virtual gamepad: %s "
+                          "(is the uinput module loaded and /dev/uinput writable?)" % error)
                 return False
             self._device = device
             self._write_failed = False
             self.path = node_path(device)
-            log.write("pad: virtuelles Xbox-360-Gamepad angelegt" + (" (%s)" % self.path if self.path else ""))
+            log.write("pad: virtual Xbox 360 gamepad created" + (" (%s)" % self.path if self.path else ""))
             # a first report at rest, so nothing reads as held. no settle time needed: unlike Windows, an
             # event that arrives before anyone has the device open is simply dropped, and the next of the
             # PS3's 60 reports a second repeats the state anyway.
@@ -184,7 +185,7 @@ class VirtualGamepad:
         except OSError as error:
             if not self._write_failed:
                 self._write_failed = True     # say it once, not 60 times a second
-                log.write("pad: Gamepad-Report fehlgeschlagen: %s" % error)
+                log.write(_("pad: gamepad report failed: %s") % error)
 
     def close(self) -> None:
         with self._gate:
@@ -197,4 +198,4 @@ class VirtualGamepad:
                 pass
             self._device = None
             self.path = None
-            log.write("pad: virtuelles Gamepad entfernt")
+            log.write(_("pad: virtual gamepad removed"))
