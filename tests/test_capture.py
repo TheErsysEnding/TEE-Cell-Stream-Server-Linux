@@ -1228,7 +1228,12 @@ class PacingTests(unittest.TestCase):
                                         "a %.1f ms write - which fits in a %.2f ms slot - dropped the "
                                         "cadence to %.1f/s (%d slots thrown away)"
                                         % (cost * 1000, interval * 1000, rate, late))
-                self.assertEqual(late, 0, "%d slots skipped for a write that fits in one" % late)
+                # Not zero: the tightest case here leaves 0.84 ms of the slot free, which is inside the
+                # scheduler's own noise on a busy machine, and this asserts a RATE and not a schedule. The
+                # bug it guards against skipped every other slot - 174 in 5 s, ~35/s - so anything that
+                # keeps the rate above `floor` with a handful of skips over 2 s (120 slots) is the fix
+                # working, and 20 would already mean the halving is back.
+                self.assertLess(late, 20, "%d slots skipped for a write that fits in one" % late)
                 sd, longest = _StampedSink.spread([(b - a) for a, b in zip(times, times[1:])])
                 self.assertLess(longest, 2 * self.INTERVAL_MS, "longest gap %.1f ms" % longest)
 

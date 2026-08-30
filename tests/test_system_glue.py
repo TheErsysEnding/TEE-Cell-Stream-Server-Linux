@@ -371,8 +371,9 @@ XRANDR_SAMPLE = (
 class _FakeBackend:
     name = "fake"
 
-    def __init__(self, width=2560, height=1440, switch_error=None, restore_error=None, modes=None):
+    def __init__(self, width=2560, height=1440, switch_error=None, restore_error=None, modes=None, refresh=0.0):
         self.width, self.height = width, height
+        self.refresh = refresh
         self.switch_error, self.restore_error = switch_error, restore_error
         self.modes = modes or []
         self.calls = []
@@ -383,7 +384,7 @@ class _FakeBackend:
 
     def read(self):
         self.calls.append("read")
-        return display_mode._Snapshot(self.width, self.height, "fake")
+        return display_mode._Snapshot(self.width, self.height, "fake", None, self.refresh)
 
     def switch(self, snapshot, width, height, refresh_hz):
         self.calls.append(("switch", width, height, refresh_hz))
@@ -876,6 +877,28 @@ class ChooseCaptureModeTests(unittest.TestCase):
         self.assertNotEqual((chosen[0], chosen[1]), (1280, 720))
         self.assertGreaterEqual(chosen[2], 60 * display_mode.CAPTURE_REFRESH_FACTOR)
 
+
+    def test_a_rate_only_change_really_switches(self):
+        """The bug the "sixty" strategy walked straight into: match_to compared width and height and not
+        the rate, so a desktop at 2560x1440@320 asked for 2560x1440@60 reported "already there" and
+        switched nothing at all. The user saw no dialog and no change, and the log said so cheerfully."""
+        backend = _FakeBackend(2560, 1440, refresh=320.001)
+        mode = display_mode.DisplayMode(backend)
+        self.assertTrue(mode.match_to(2560, 1440, 60.0))
+        self.assertIn(("switch", 2560, 1440, 60.0), backend.calls)
+
+    def test_the_same_rate_at_the_same_size_still_switches_nothing(self):
+        # 59.9506 is what a monitor calls 60; asking for 60 must not restart the desktop for nothing
+        backend = _FakeBackend(2560, 1440, refresh=59.9506)
+        mode = display_mode.DisplayMode(backend)
+        self.assertTrue(mode.match_to(2560, 1440, 60.0))
+        self.assertNotIn("switch", [call[0] if isinstance(call, tuple) else call for call in backend.calls])
+
+    def test_a_backend_without_a_rate_keeps_the_old_size_only_behaviour(self):
+        backend = _FakeBackend(2560, 1440)          # refresh 0.0: cannot say
+        mode = display_mode.DisplayMode(backend)
+        self.assertTrue(mode.match_to(2560, 1440, 60.0))
+        self.assertNotIn("switch", [call[0] if isinstance(call, tuple) else call for call in backend.calls])
 
     def test_sixty_hz_strategy_puts_the_desktop_on_the_streams_own_clock(self):
         """The point of the "sixty" strategy: no beat. The compositor, our grid and the console all tick

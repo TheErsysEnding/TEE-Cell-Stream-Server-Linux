@@ -206,6 +206,10 @@ PREFERRED_DESKTOP_SIZES = ((1280, 720), (1920, 1080), (2560, 1440))
 # unevenly spaced 58: which of those an eye prefers is not something to reason about, so it is a switch.
 DISPLAY_STRATEGIES = ("off", "capture", "sixty")
 
+# Monitors report 59.9506 for what everyone calls 60, and 320.00146 for 320. A rate is "the same" within
+# this much - wide enough for that, narrow enough to tell 60 from 120.
+REFRESH_TOLERANCE_HZ = 1.0
+
 CONFIRM_SECONDS = 15
 
 
@@ -364,11 +368,12 @@ def build_config(state: DisplayState, primary: LogicalMonitor, new_mode: Mode, n
 
 @dataclass
 class _Snapshot:
-    """What read() found: the primary's current size, plus whatever the backend needs to switch it."""
+    """What read() found: the primary's current size and rate, plus whatever the backend needs to switch it."""
     width: int
     height: int
     detail: str = ""
     payload: object = None
+    refresh: float = 0.0   # 0 = the backend could not say; match_to then compares the size alone, as it used to
 
 
 def _dbus_error_text(error: GLib.Error) -> str:
@@ -447,7 +452,8 @@ class _MutterBackend:
         mode = monitor.current_mode() if monitor is not None else None
         if monitor is None or mode is None:
             raise DisplayError("primärer Monitor %s hat keinen aktiven Modus" % primary.connectors[0])
-        return _Snapshot(mode.width, mode.height, "%s %s" % (monitor.connector, mode.id), (state, primary, monitor, mode))
+        return _Snapshot(mode.width, mode.height, "%s %s" % (monitor.connector, mode.id),
+                         (state, primary, monitor, mode), mode.refresh)
 
     def capture_modes(self) -> list:
         """Every mode the primary monitor offers, for choose_capture_mode."""
@@ -563,7 +569,9 @@ class _XrandrBackend:
         screen = parse_xrandr(self._run(["--query"]))
         if screen is None:
             raise DisplayError("xrandr meldet keinen angeschlossenen Ausgang")
-        return _Snapshot(screen.width, screen.height, "%s %dx%d@%g" % (screen.output, screen.width, screen.height, screen.rate), screen)
+        return _Snapshot(screen.width, screen.height,
+                         "%s %dx%d@%g" % (screen.output, screen.width, screen.height, screen.rate),
+                         screen, screen.rate)
 
     def capture_modes(self) -> list:
         return []
@@ -708,7 +716,12 @@ class DisplayMode:
             except Exception as error:   # noqa: BLE001 - a backend bug must degrade to "scaled", never to a crash
                 log.write("display: Fehler beim Lesen der Auflösung (%s), streame stattdessen skaliert" % error)
                 return False
-            if snapshot.width == width and snapshot.height == height:
+            # The rate has to be part of this. The "sixty" strategy changes ONLY the rate - same size, 60 Hz
+            # instead of 320 - and a size-only test reported "already there" and switched nothing at all.
+            # A backend that cannot report a rate sends 0 and keeps the old size-only behaviour.
+            same_size = snapshot.width == width and snapshot.height == height
+            same_rate = not snapshot.refresh or abs(snapshot.refresh - refresh_hz) <= REFRESH_TOLERANCE_HZ
+            if same_size and same_rate:
                 return True   # already there
 
             try:
