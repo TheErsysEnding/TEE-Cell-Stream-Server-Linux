@@ -1,3 +1,15 @@
+tee-cell-stream-server (1.21.1) unstable; urgency=medium
+
+  * Mit gesetztem TEE_CST_TRACE schreibt die Aufnahme jede Sekunde eine
+    Zeile ins Log: wie viele Bilder die Quelle geliefert hat, wie viele
+    davon an ffmpeg gingen und wie viele ein neueres ueberholt hat. Ohne
+    die Umgebungsvariable aendert sich nichts. Gedacht fuer die Suche nach
+    dem, was die Quellrate ueber 60 treibt - und noetig, weil die Anzeige
+    im Fenster dafuer nicht taugt: das Fenster im Vordergrund zu haben ist
+    selbst eine der Ursachen, die gesucht werden.
+
+ -- TEE <github@teebug.de>  Sun, 30 Aug 2026 14:00:00 +0200
+
 tee-cell-stream-server (1.21.0) unstable; urgency=medium
 
   * Die Statuszeile zeigt waehrend eines Streams, wie viele Bilder pro Sekunde

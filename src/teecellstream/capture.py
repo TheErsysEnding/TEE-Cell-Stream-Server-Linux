@@ -82,6 +82,12 @@ SERVO_GATE_WRITES = 30
 # A live capture that has produced nothing new for this long gets the frozen-capture hint, once per stream.
 # Timed, not counted in repeats: repeats now leave here at `fps`, so counting them would measure nothing.
 FROZEN_HINT_S = 3.0
+# Per-second trace of what the source delivers, into the normal log. Off unless TEE_CST_TRACE is set, because
+# it writes a line a second for as long as a stream runs - useful for a diagnosis session, noise otherwise.
+# It is the only way to watch the source rate WITHOUT the server window in front, and the window being in
+# front is itself one of the things that raises the rate (every redraw of it is another picture).
+TRACE_SOURCE_RATE = bool(os.environ.get("TEE_CST_TRACE"))
+
 # A source that has been quiet this long counts as 0 fps. captured_fps is only ever written when a picture
 # arrives, so a stalled source would otherwise report its last number for the rest of the session.
 STALE_FPS_S = 2.0
@@ -621,6 +627,7 @@ class _PipeCapture(ScreenCapture):
         size = self._frame_bytes
         window_start = time.monotonic()
         window_frames = 0
+        last_written = last_skipped = 0   # counter values at the start of the current one-second window
         # this run's buffers, held locally exactly as feed() holds them. stop() joins this thread before a
         # start() swaps the list, but that join has a timeout: if it ever ran out, this reader would go on
         # publishing an index into the list the NEXT run's feed() reads from - an index into a buffer that
@@ -656,11 +663,21 @@ class _PipeCapture(ScreenCapture):
                     self._generation += 1
                     self._fresh.notify_all()   # feed() sends this picture at once - see the pacing note there
                 if self._source_frames == 1:
+                    last_written, last_skipped = self._new_frames, self._skipped_frames
                     log.write("capture: erstes Bild von der Quelle nach %d ms" % int((time.monotonic() - self._started_at) * 1000))
                 window_frames += 1
                 now = published
                 if now - window_start >= 1.0:
                     self.captured_fps = window_frames
+                    if TRACE_SOURCE_RATE:
+                        # One line a second while a stream runs. It exists because the status line in the
+                        # window cannot be used to find out what raises the source rate: having the window in
+                        # front is itself one of the things being tested (every redraw of it is another
+                        # picture GNOME hands us). A log line can be read while the window is minimised.
+                        written, skipped = self._new_frames, self._skipped_frames
+                        log.write("trace: Quelle %d/s, an ffmpeg %d neu, %d überholt"
+                                  % (window_frames, written - last_written, skipped - last_skipped))
+                        last_written, last_skipped = written, skipped
                     window_frames = 0
                     window_start = now
         except Exception as error:   # noqa: BLE001

@@ -20,6 +20,7 @@ if os.path.isdir(_RUNTIME):
     if os.path.exists(_RUNTIME + "/bus"):
         os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=" + _RUNTIME + "/bus")
 
+import re           # noqa: E402
 import signal       # noqa: E402
 import struct       # noqa: E402
 import subprocess   # noqa: E402
@@ -28,7 +29,7 @@ import threading    # noqa: E402
 import time         # noqa: E402
 import unittest     # noqa: E402
 
-from teecellstream import capture, portal   # noqa: E402
+from teecellstream import capture, log, portal   # noqa: E402
 from teecellstream.settings import settings  # noqa: E402
 
 W, H, FPS = 1280, 720, 60
@@ -1072,6 +1073,46 @@ class PacingTests(unittest.TestCase):
         self.assertFalse(self.feeder.is_alive(), "feed() did not end after stop()")
         return FrameSink.rate(self.sink.times)
 
+    # --- the per-second trace line -----------------------------------------------------------------
+    # It is what makes a diagnosis session possible at all: the status line in the window cannot answer
+    # "what raises the source rate", because having the window in front is itself one of the things that
+    # raises it (every redraw of it is another picture GNOME hands us). Off unless TEE_CST_TRACE is set.
+
+    def _traced(self, source_fps, seconds=2.5):
+        lines = []
+        saved_write, saved_flag = log.write, capture.TRACE_SOURCE_RATE
+        log.write, capture.TRACE_SOURCE_RATE = lambda text: lines.append(text), True
+        try:
+            self._run(source_fps, seconds=seconds)
+        finally:
+            log.write, capture.TRACE_SOURCE_RATE = saved_write, saved_flag
+        return [line for line in lines if line.startswith("trace: ")]
+
+    def test_trace_reports_a_source_over_the_grid_and_the_pictures_it_costs(self):
+        traces = self._traced(90)
+        self.assertGreaterEqual(len(traces), 2, traces)
+        rates = [int(re.search(r"Quelle (\d+)/s", line).group(1)) for line in traces]
+        self.assertTrue(all(rate > 62 for rate in rates), traces)     # 90/s really is over the band
+        superseded = [int(re.search(r"(\d+) überholt", line).group(1)) for line in traces]
+        self.assertTrue(any(count > 0 for count in superseded),
+                        "a source over the grid must show pictures being superseded: %r" % traces)
+
+    def test_trace_reports_a_source_on_the_grid_as_costing_nothing(self):
+        traces = self._traced(FPS)
+        self.assertGreaterEqual(len(traces), 2, traces)
+        superseded = [int(re.search(r"(\d+) überholt", line).group(1)) for line in traces]
+        self.assertEqual([], [count for count in superseded if count > 2], traces)
+
+    def test_nothing_is_traced_while_the_switch_is_off(self):
+        lines = []
+        saved_write, saved_flag = log.write, capture.TRACE_SOURCE_RATE
+        log.write, capture.TRACE_SOURCE_RATE = lambda text: lines.append(text), False
+        try:
+            self._run(90, seconds=2.0)
+        finally:
+            log.write, capture.TRACE_SOURCE_RATE = saved_write, saved_flag
+        self.assertEqual([], [line for line in lines if line.startswith("trace: ")])
+
     def test_source_at_120_is_capped_at_the_stream_rate(self):
         rate = self._run(120)
         self.assertTrue(54 <= rate <= 66, "120 fps source came out at %.1f fps (cap is %d)" % (rate, FPS))
@@ -1550,3 +1591,4 @@ class SmoothnessReport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
