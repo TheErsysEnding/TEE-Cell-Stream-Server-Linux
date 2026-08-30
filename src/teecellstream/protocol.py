@@ -82,6 +82,15 @@ ENTROPY_CODERS = ("cavlc", "cabac")
 RATE_CONTROLS = ("vbr", "quality", "cbr")
 QUALITY_CRF = 20                 # x264's -crf for the "quality" mode: visually clean without being wasteful
 
+# Slices per picture - a TEST setting, x264 only, and 1 is what every measurement in this repo was made with.
+# The idea behind trying more: cellVdec is handed several SPUs (4, in the console app's decode-h264.c), and a
+# decoder that splits its work by slice can only use them if the picture HAS several. It was tried once, in
+# 1.12.1, and measured worse - but that run is not worth much: the slices came from x264's sliced-threads on a
+# 24-core machine (so ~24 of them, not 4), it predates the HRD timing that later halved the latency, and the
+# splitter it ran through mis-framed multi-slice streams (see stream_sender.AnnexBSplitter). Hence a clean
+# switch instead of a fixed 1.
+SLICE_COUNTS = (1, 2, 4)
+
 SINFO_LEVEL = 42                 # the floor: H.264 level 4.2 covers everything up to and including 1920x1088
 
 # (level, max macroblocks per picture, max macroblocks per second) - Annex A of the H.264 spec. 4.2 stops at

@@ -45,6 +45,10 @@ DISPLAY_HINTS = ("Der Desktop bleibt, wie er ist – gestreamt wird vom nativen 
                  "Standard: höchste Bildwiederholrate, die die Aufnahme nutzen kann – die meisten Bilder",
                  "Versuch: Monitor auf 60 Hz, damit Spiel, Desktop und Stream denselben Takt haben")
 
+SLICE_LABELS = ("1 (Standard)", "2", "4")
+SLICE_HINTS = ("Ein Bild am Stück – so wurde alles bisher gemessen",
+               "Versuch: zwei Streifen je Bild. Nur x264. Kostet etwas Bitrate, weil über die Kante nicht vorhergesagt wird",
+               "Versuch: vier Streifen je Bild – so viele, wie der Decoder SPUs hat. Nur x264")
 RATE_LABELS = ("Variabel", "Konstante Qualität", "Konstante Bitrate")
 RATE_HINTS = ("Bitrate nur, wenn sich etwas bewegt – die ursprüngliche Einstellung",
               "Standard: gemessen die niedrigste Latenz (29 ms), und Text bleibt auch im Leerlauf scharf",
@@ -286,6 +290,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.rate_row.connect("notify::selected", self._on_rate_selected)
         group.add(self.rate_row)
 
+        self.slice_row = Adw.ComboRow(title="Slices je Bild (Versuch)",
+                                      model=Gtk.StringList.new(list(SLICE_LABELS)))
+        self.slice_row.connect("notify::selected", self._on_slice_selected)
+        group.add(self.slice_row)
+
         self.display_row = Adw.ComboRow(title="Desktop während des Streams",
                                         model=Gtk.StringList.new(list(DISPLAY_LABELS)))
         self.display_row.connect("notify::selected", self._on_display_selected)
@@ -476,6 +485,7 @@ class MainWindow(Adw.ApplicationWindow):
         it always fits."""
         for row, hints in ((self.size_row, SIZE_HINTS), (self.coder_row, ENTROPY_HINTS),
                            (self.rate_row, RATE_HINTS), (self.recovery_row, LOSS_RECOVERY_HINTS),
+                           (self.slice_row, SLICE_HINTS),
                            (self.display_row, DISPLAY_HINTS)):
             index = row.get_selected()
             if 0 <= index < len(hints) and row.get_subtitle() != hints[index]:
@@ -492,6 +502,18 @@ class MainWindow(Adw.ApplicationWindow):
             self._sync_choices()
             return
         self._server.rate_control = protocol.RATE_CONTROLS[index]
+
+    def _on_slice_selected(self, row, _pspec) -> None:
+        if self._syncing:
+            return
+        index = row.get_selected()
+        if index < 0 or index >= len(protocol.SLICE_COUNTS) or protocol.SLICE_COUNTS[index] == self._server.slice_count:
+            return
+        if self._server.is_ps3_connected:
+            log.write("video: erst den Stream beenden, dann die Slice-Zahl wechseln")
+            self._sync_choices()
+            return
+        self._server.slice_count = protocol.SLICE_COUNTS[index]
 
     # --- the "can you still see this?" safety net ------------------------------------------------
     # A monitor can accept a mode and show nothing at all. The user is then staring at a black desktop
@@ -754,6 +776,11 @@ class MainWindow(Adw.ApplicationWindow):
             index = protocol.RATE_CONTROLS.index(rate) if rate in protocol.RATE_CONTROLS else 0
             if self.rate_row.get_selected() != index:
                 self.rate_row.set_selected(index)
+
+            slices = getattr(server, "slice_count", 1)
+            index = protocol.SLICE_COUNTS.index(slices) if slices in protocol.SLICE_COUNTS else 0
+            if self.slice_row.get_selected() != index:
+                self.slice_row.set_selected(index)
 
             self._sync_hints()
 

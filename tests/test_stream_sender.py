@@ -316,8 +316,17 @@ class FragmentHeaderTest(unittest.TestCase):
 
 # ---------------------------------------------------------------- splitter on hand-built streams
 
-def nal(nal_type: int, payload: bytes, ref_idc: int = 3, four_byte: bool = True) -> bytes:
+def nal(nal_type: int, payload: bytes, ref_idc: int = 3, four_byte: bool = True, first_mb: int = 0) -> bytes:
+    """A picture NAL (1 or 5) begins its payload with first_mb_in_slice, exp-Golomb coded - and exp-Golomb
+    writes 0 as the single bit 1. So the top bit of the first payload byte says whether this slice STARTS a
+    picture or continues one, and that is exactly the bit the splitter reads. Real streams always carry it;
+    these payloads are otherwise random, so it is forced here rather than left to chance."""
     start = b"\x00\x00\x00\x01" if four_byte else b"\x00\x00\x01"
+    if nal_type in (1, 5) and payload:
+        # top bit set = first_mb_in_slice 0; cleared (but never a zero byte, which could read as a start
+        # code) = some later macroblock, i.e. a continuation slice
+        head = (payload[0] | 0x80) if first_mb == 0 else ((payload[0] & 0x7F) | 0x40)
+        payload = bytes([head]) + payload[1:]
     return start + bytes([(ref_idc << 5) | nal_type]) + payload
 
 
@@ -380,6 +389,42 @@ class AnnexBSplitterSyntheticTest(unittest.TestCase):
         self.assertEqual(scan_nal_types(units[1][0]), [6, 1])
         self.assertEqual(scan_nal_types(units[2][0]), [1])
         self.assertEqual(scan_nal_types(units[3][0]), [6, 1])
+
+    def test_several_slices_stay_one_access_unit(self):
+        """A 4-slice picture must leave here as ONE unit with one frame id. Before first_mb_in_slice was
+        read, every slice after the first looked like the start of the next picture, so the console was
+        handed quarter-pictures as whole ones - which is why the 1.12.1 "slices are worse" run is void."""
+        stream = (nal(7, body(1, 12)) + nal(8, body(2, 5))
+                  + nal(5, body(3, 30)) + nal(5, body(4, 30), first_mb=99)
+                  + nal(5, body(5, 30), first_mb=198) + nal(5, body(6, 30), first_mb=297)
+                  + nal(6, body(7, 4), ref_idc=0)
+                  + nal(1, body(8, 20), ref_idc=2) + nal(1, body(9, 20), ref_idc=2, first_mb=99)
+                  + nal(6, body(10, 4), ref_idc=0) + nal(1, body(11, 20), ref_idc=2))
+        for chunks in ([stream], [stream[:23], stream[23:]], [stream[i:i + 1] for i in range(len(stream))]):
+            units = split_with(AnnexBSplitter(), chunks)
+            self.assertEqual([scan_nal_types(data) for data, _keyframe in units],
+                             [[7, 8, 5, 5, 5, 5], [6, 1, 1], [6, 1]],
+                             "jedes Bild bleibt eine Einheit, egal wie viele Slices es hat")
+            self.assertEqual([keyframe for _data, keyframe in units], [True, False, False])
+
+    def test_slice_report_counts_what_actually_went_out(self):
+        splitter = AnnexBSplitter()
+        self.assertIn("keine Bilder", splitter.slice_report())
+        stream = (nal(5, body(1, 30)) + nal(5, body(2, 30), first_mb=99)
+                  + nal(6, body(3, 4), ref_idc=0)
+                  + nal(1, body(4, 20), ref_idc=2) + nal(1, body(5, 20), ref_idc=2, first_mb=99)
+                  + nal(6, body(6, 4), ref_idc=0) + nal(1, body(7, 20), ref_idc=2))
+        split_with(splitter, [stream])
+        report = splitter.slice_report()
+        self.assertIn("3 Bilder", report)
+        self.assertIn("2 Slices (2x)", report)
+        self.assertIn("1 Slices (1x)", report)
+
+    def test_one_slice_per_picture_is_reported_as_one(self):
+        splitter = AnnexBSplitter()
+        split_with(splitter, [SYNTHETIC_STREAM])
+        self.assertIn("4 Bilder", splitter.slice_report())
+        self.assertIn("1 Slices (4x)", splitter.slice_report())
 
     def test_filler_is_dropped_and_never_joins_a_unit(self):
         """Filler data (NAL 12) pads a constant-rate stream and carries no picture. Sending it would turn a
@@ -488,13 +533,17 @@ class AnnexBSplitterSyntheticTest(unittest.TestCase):
 
             def take(self):
                 p = self.pending
-                while self.completed is None and self.scan + 3 < len(p):
+                while self.completed is None and self.scan + 4 < len(p):
                     if not (p[self.scan] == 0 and p[self.scan + 1] == 0 and p[self.scan + 2] == 1):
                         self.scan += 1
                         continue
                     nal_start = self.scan - 1 if (self.scan > 0 and p[self.scan - 1] == 0) else self.scan
                     nal_type = p[self.scan + 3] & 0x1F
-                    if self.unit_start >= 0 and self.has_picture:
+                    # the ONE deliberate divergence from the Windows original, carried here so the rest of
+                    # the comparison still means something: the original closes a unit on any NAL after a
+                    # picture, which is right only while a picture is one slice. See AnnexBSplitter.
+                    continues = nal_type in (1, 5) and self.has_picture and not p[self.scan + 4] & 0x80
+                    if self.unit_start >= 0 and self.has_picture and not continues:
                         self.completed = (bytes(p[self.unit_start:nal_start]), self.keyframe)
                         del p[:nal_start]
                         self.scan -= nal_start

@@ -76,7 +76,7 @@ class Server:
             protocol.SEND_RATE_KBPS, capture.create_capture, lambda: self.encoders_to_try,
             lambda: self.loss_recovery, self._on_all_encoders_failed,
             lambda: self.video_kbps, lambda: self.entropy_coder, lambda: self.stream_size,
-            lambda: self.rate_control)
+            lambda: self.rate_control, lambda: self.slice_count)
         # the same resolved binary the video uses (and the one the "bereit:" line names): audio must not
         # fall back to a bare "ffmpeg" off PATH while video runs an absolute path
         self.audio_streamer = AudioStreamer(self.sock, self.ffmpeg_path)   # desktop sound goes with the desktop picture
@@ -294,6 +294,27 @@ class Server:
             return
         settings.set("rate_control", value)
         log.write("video: Ratensteuerung ab dem nächsten Stream: " + value.upper())
+
+    @property
+    def slice_count(self) -> int:
+        """Slices per picture, x264 only - a TEST setting, see protocol.SLICE_COUNTS. 1 is what every
+        measurement so far was made with, and anything unreadable falls back to it."""
+        try:
+            value = int(settings.get("slice_count", 1))
+        except (TypeError, ValueError):
+            return 1
+        return value if value in protocol.SLICE_COUNTS else 1
+
+    @slice_count.setter
+    def slice_count(self, value: int) -> None:
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return
+        if value not in protocol.SLICE_COUNTS or value == self.slice_count:
+            return
+        settings.set("slice_count", value)
+        log.write("video: %d Slice(s) je Bild ab dem nächsten Stream (nur x264)" % value)
 
     @property
     def swap_mouse_sticks(self) -> bool:

@@ -59,7 +59,7 @@ class LiveStreamer:
     # burst overruns it and the picture freezes until the next one.
     def __init__(self, sock, ffmpeg_path, fps, kbps, width, height, send_rate_kbps, create_capture,
                  encoders_to_try, loss_recovery, on_all_encoders_failed, video_kbps=None, entropy_coder=None,
-                 stream_size=None, rate_control=None):
+                 stream_size=None, rate_control=None, slice_count=None):
         self._sock = sock
         self._ffmpeg_path = ffmpeg_path
         self._fps = fps
@@ -77,6 +77,7 @@ class LiveStreamer:
         self._entropy_coder = entropy_coder
         self._stream_size = stream_size
         self._rate_control = rate_control
+        self._slice_count = slice_count
 
         # SINFO's level field. The Windows original had to get it right because its PS3 build sized the
         # decoder from it; this PS3 app does not - it reads coded size, level and ref frames out of the
@@ -120,6 +121,15 @@ class LiveStreamer:
         """"vbr", "quality" or "cbr"; anything unknown (including None) falls back to the proven "vbr"."""
         chosen = self._rate_control() if callable(self._rate_control) else self._rate_control
         return chosen if chosen in protocol.RATE_CONTROLS else "vbr"
+
+    def _current_slice_count(self) -> int:
+        """Slices per picture for the x264 rung; anything unknown (including None) means the proven 1."""
+        chosen = self._slice_count() if callable(self._slice_count) else self._slice_count
+        try:
+            chosen = int(chosen)
+        except (TypeError, ValueError):
+            return 1
+        return chosen if chosen in protocol.SLICE_COUNTS else 1
 
     def _current_size(self) -> tuple[int, int]:
         """The stream size for the next session; anything unknown falls back to the constructor's."""
@@ -292,7 +302,8 @@ class LiveStreamer:
         try:
             args = encoders.build_ffmpeg_args(self._ffmpeg_path, encoder, input_args, session.width, session.height,
                                               self._fps, self._current_kbps(), loss_recovery, capture.needs_scale,
-                                              self._current_entropy_coder(), self._current_rate_control())
+                                              self._current_entropy_coder(), self._current_rate_control(),
+                                              self._current_slice_count())
             process = _spawn_ffmpeg(args, raw_pipe)
         except (OSError, ValueError) as error:
             log.write("live: ffmpeg startet nicht: %s" % error)
@@ -392,6 +403,9 @@ class LiveStreamer:
                     log.write("live: erstes Frame %d ms nach Encoder-Start gesendet"
                               % int((time.monotonic() - first_frame_timer) * 1000))
 
+        # what actually went out, per picture - the ground truth for a slice experiment (and a free check
+        # that a normal stream really is one slice per picture)
+        log.write(splitter.slice_report())
         first_frame_seen.set()   # release the timeout thread if we're leaving for any other reason
         timeout_thread.join()
         died_on_its_own = process.poll() is not None   # note it before we terminate it ourselves

@@ -200,7 +200,7 @@ def _coder_args(entropy_coder: str) -> list[str]:
 
 def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_args: list[str], width: int, height: int,
                       fps: int, kbps: int, loss_recovery: str, capture_needs_scale: bool,
-                      entropy_coder: str = "auto", rate_control: str = "vbr") -> list[str]:
+                      entropy_coder: str = "auto", rate_control: str = "vbr", slices: int = 1) -> list[str]:
     """The whole ffmpeg command line: capture input in, raw Annex-B H.264 out on stdout.
 
     A raw-pipe capture (Portal/PipeWire, test source) already delivers I420/bt709/limited at the output
@@ -263,16 +263,20 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
         # -threads 1 is what makes this rung usable at all. With sliced threads off, x264 falls back to
         # FRAME threading, and on a many-core machine that buffers about one frame per thread before it
         # hands the first one out: measured on this 24-core PC, 26 frames held back = 433 ms of latency,
-        # in a program whose whole point is 25 ms. sliced-threads=1 also fixes the delay but splits each
-        # picture into one slice per thread, and multiple slices measured clearly WORSE on the console.
-        # One thread costs nothing here: 294 fps at 1792x1008, 400 at 1536x864 - five times real time.
+        # in a program whose whole point is 25 ms. One thread costs nothing here: 294 fps at 1792x1008,
+        # 400 at 1536x864 - five times real time.
+        #
+        # `slices` is a test setting and 1 everywhere until someone changes it (protocol.SLICE_COUNTS says
+        # why it exists). It is deliberately NOT sliced-threads: that would tie the slice count to the
+        # thread count and bring back the frame-buffering latency this rung exists to avoid. slices=N with
+        # threads=1 divides the picture without touching the threading at all.
         args += capture_input_args
         if capture_needs_scale:
             args += ["-vf", _scale_filter(width, height, "yuv420p")]
         args += ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
                  "-threads", "1",   # AFTER the input: before it, ffmpeg would read it as a decoder setting
-                 "-x264-params", "sliced-threads=0:slices=1:intra-refresh=%d%s"
-                 % (1 if intra else 0, _HRD_PARAM.get(rate_control, _HRD_DEFAULT))]
+                 "-x264-params", "sliced-threads=0:slices=%d:intra-refresh=%d%s"
+                 % (max(1, slices), 1 if intra else 0, _HRD_PARAM.get(rate_control, _HRD_DEFAULT))]
         args += _coder_args(entropy_coder)
         args += _rate_args(kbps, rate_control)
         args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)

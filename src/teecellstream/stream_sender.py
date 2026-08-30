@@ -86,6 +86,17 @@ def send_access_unit(sock, target: tuple[str, int], frame_id: int, data, keyfram
 # unit, and the unit ends where the next unit's first NAL begins - so a unit only comes out once the
 # encoder has begun the next one (a live pipe never needs the last one; flush() exists for files/tests).
 #
+# "the next unit's first NAL" is the part that needs care once a picture may hold more than ONE slice.
+# H.264 numbers every slice by the macroblock it starts at, and only the first slice of a picture starts
+# at 0. That number is first_mb_in_slice, the very first syntax element of the slice header, coded as
+# exp-Golomb - and exp-Golomb writes the value 0 as the single bit 1. So "is this slice the start of a new
+# picture" is one bit test on the byte after the NAL header, and nothing has to be parsed.
+#
+# Without that test every slice after the first would look like the beginning of the next picture, and a
+# 4-slice picture would leave here as 4 access units with 4 frame ids. The console would then be handed
+# quarter-pictures as if they were whole ones. Multiple slices HAVE been tried before and measured worse
+# on the console (1.12.1) - with this splitter underneath, which is reason enough to distrust that result.
+#
 # start codes are found with bytes.find (C speed): at 10Mbit/s that is ~1000 NALs a second, and walking
 # the buffer byte by byte in Python was measured far too slow to keep up with the encoder.
 class AnnexBSplitter:
@@ -96,6 +107,11 @@ class AnnexBSplitter:
         self._unit_has_picture = False
         self._unit_keyframe = False
         self._completed: tuple[bytes, bool] | None = None
+        # what actually left here, for slice experiments: asked-for and emitted are not the same thing
+        self._unit_slices = 0                      # picture NALs in the open unit
+        self._slices_seen: dict[int, int] = {}     # slices per picture -> how many pictures had that many
+        self._pictures = 0
+        self._picture_bytes = 0
 
     def push(self, data) -> None:
         self._pending += data
@@ -111,18 +127,24 @@ class AnnexBSplitter:
                 # no start code yet; keep the last two bytes in view - they may be the front of a split one
                 self._scan = max(self._scan, available - 2)
                 break
-            if position + 3 >= available:
-                self._scan = position   # start code seen but its NAL header byte has not arrived: resume right here
+            if position + 4 >= available:
+                # the NAL header byte AND the first byte behind it have to be here: first_mb_in_slice lives
+                # in that second byte and decides whether a slice opens a picture or continues one
+                self._scan = position
                 break
 
             nal_start = position - 1 if (position > 0 and pending[position - 1] == 0) else position
             nal_type = pending[position + 3] & 0x1F
             is_picture = nal_type in _PICTURE_NAL_TYPES
+            # first_mb_in_slice != 0 means this slice continues the picture that is already open. With one
+            # slice per picture the test never fires; with several it is the only thing holding them together.
+            continues_picture = is_picture and self._unit_has_picture and not pending[position + 4] & 0x80
 
-            if self._unit_start >= 0 and self._unit_has_picture:
+            if self._unit_start >= 0 and self._unit_has_picture and not continues_picture:
                 # a complete access unit ends where the next one's first unit begins
                 with memoryview(pending) as window:
                     self._completed = (bytes(window[self._unit_start:nal_start]), self._unit_keyframe)
+                self._count_picture(self._unit_slices, nal_start - self._unit_start)
                 # drop the consumed bytes; the new unit (if any) restarts at the front of the buffer
                 del pending[:nal_start]
                 position -= nal_start
@@ -130,6 +152,7 @@ class AnnexBSplitter:
                 self._unit_start = -1
                 self._unit_has_picture = False
                 self._unit_keyframe = False
+                self._unit_slices = 0
             if nal_type == _FILLER_NAL_TYPE:
                 # opens no unit, so its bytes fall in front of the next one's start and are dropped with
                 # the next trim. it must not extend the unit it follows either - that is what sent it.
@@ -139,9 +162,11 @@ class AnnexBSplitter:
                 self._unit_start = nal_start
                 self._unit_has_picture = False
                 self._unit_keyframe = False
+                self._unit_slices = 0
             if is_picture:
                 self._unit_has_picture = True
                 self._unit_keyframe |= nal_type == 5
+                self._unit_slices += 1
             self._scan = position + 3
 
         result = self._completed
@@ -157,9 +182,32 @@ class AnnexBSplitter:
         if self._unit_start < 0 or not self._unit_has_picture:
             return None
         result = (bytes(self._pending[self._unit_start:]), self._unit_keyframe)
+        self._count_picture(self._unit_slices, len(result[0]))
         self._pending.clear()
         self._scan = 0
         self._unit_start = -1
         self._unit_has_picture = False
         self._unit_keyframe = False
+        self._unit_slices = 0
         return result
+
+    def _count_picture(self, slices: int, size: int) -> None:
+        """Book one finished picture. Called where a unit is handed out, so it counts what was SENT."""
+        if slices <= 0:
+            return              # a unit with no picture in it is not a picture
+        self._slices_seen[slices] = self._slices_seen.get(slices, 0) + 1
+        self._pictures += 1
+        self._picture_bytes += size
+
+    def slice_report(self) -> str:
+        """What the encoder actually emitted, per picture. The point of the line is that "-x264-params
+        slices=4" is a REQUEST: x264 may hand out fewer (a picture too small to divide) and the console
+        only ever sees what came out. Bytes per picture is the second half of the trade - more slices cost
+        bits, because nothing may be predicted across a slice boundary and each one carries its own header."""
+        if not self._pictures:
+            return "sender: keine Bilder gesendet"
+        order = sorted(self._slices_seen.items(), key=lambda item: -item[1])
+        spread = ", ".join("%d Slices (%dx)" % (slices, pictures) for slices, pictures in order)
+        average = self._picture_bytes / self._pictures
+        return ("sender: %d Bilder gesendet, %s, Ø %.1f KB je Bild = %.1f Fragmente"
+                % (self._pictures, spread, average / 1024.0, average / FRAGMENT_PAYLOAD_BYTES))
