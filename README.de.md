@@ -4,9 +4,12 @@
 
 Streamt den Linux-Desktop live auf eine PS3 und schickt den PS3-Controller zurück an den PC — Remote Play
 in Gegenrichtung, wie Steam Remote Play/Moonlight, nur mit der PS3 als Client. Linux-Port des Windows-Tools
-`cell-stream-server` aus [ps3-dev](https://github.com/mohasi/ps3-dev) (Apache-2.0). Die PS3-App
-**cell-stream** (`cell-stream.pkg`, Release 174-a5dd795) bleibt unverändert: dieser Server spricht ihr
-Protokoll byte-genau.
+`cell-stream-server` aus [ps3-dev](https://github.com/mohasi/ps3-dev) (Apache-2.0).
+
+Auf der PS3 läuft **TEE Remote Play**, ein Build der dortigen App `cell-stream`, erweitert um Aufnahme
+nach `/dev_hdd0` (die Aufnahme taucht im XMB unter Video auf), eine Übersicht aller Steuerungen auf
+Knopfdruck und eigenes Erscheinungsbild. Am Protokoll ändert sich nichts, der Server treibt also auch
+mohasis Original `cell-stream.pkg` — dieser Build wird nur für das gebraucht, was er dazugibt.
 
 **Was heute geht:** 60 fps von 1280×720 bis **1920×1088 (Full HD)**, Ton, und der Controller steuert den
 PC — als Maus und Tastatur oder als echtes Xbox-360-Gamepad, das Spiele als eingestecktes Pad sehen.
@@ -27,7 +30,7 @@ Details im englischen [README.md](README.md).
 ## Installation (1 Klick)
 
 ```
-sudo apt install ./tee-cell-stream-server_1.22.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.23.0_all.deb
 ```
 
 Alles Nötige (ffmpeg mit NVENC, GStreamer/PipeWire, GTK4/libadwaita, evdev, Portal) kommt aus den
@@ -36,7 +39,7 @@ Ubuntu-Paketquellen. Das Paket richtet außerdem ein:
 - `/dev/uinput`-Zugriff für den angemeldeten Benutzer (udev-Regel, wie bei Steam) → virtuelles Gamepad
 - bei aktiver `ufw`-Firewall die Freigabe von **UDP 38310** (die PS3 spricht den Server darauf an)
 
-Auf der PS3 (HEN/CFW): `cell-stream.pkg` aus dem Release installieren.
+Auf der PS3 (HEN/CFW): `TEE-Remote-Play-v1.0.pkg` aus dem Release installieren.
 
 ## Benutzung
 

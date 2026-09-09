@@ -2,8 +2,12 @@
 
 Stream your Linux desktop to a PlayStation 3 and play PC games with the PS3 controller — Remote Play the
 other way round. Linux port of the Windows tool `cell-stream-server` from
-[ps3-dev](https://github.com/mohasi/ps3-dev) (Apache-2.0). The PS3 side, the homebrew app **cell-stream**,
-is unchanged: this server speaks its wire protocol byte for byte.
+[ps3-dev](https://github.com/mohasi/ps3-dev) (Apache-2.0).
+
+The PS3 side is **TEE Remote Play**, a build of that project's `cell-stream` app that adds recording to
+`/dev_hdd0` with the recording listed under XMB > Video, an on-screen list of every control, and its own
+branding. The wire protocol is untouched, so the server also drives mohasi's original `cell-stream.pkg` —
+you only need this build for the features it adds.
 
 *Deutsche Anleitung: [README.de.md](README.de.md)*
 
@@ -28,9 +32,10 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 
 ## What you need
 
-- **A PS3 with HEN or CFW**, running `cell-stream.pkg` from the
-  [ps3-dev release](https://github.com/mohasi/ps3-dev/releases/tag/174-a5dd795). Without it there is
-  nothing to stream to — this package is only the PC half.
+- **A PS3 with HEN or CFW**, running `TEE-Remote-Play-v1.0.pkg` from [Releases](../../releases).
+  Without a PS3-side app there is nothing to stream to — this package is only the PC half.
+  mohasi's original [`cell-stream.pkg`](https://github.com/mohasi/ps3-dev/releases/tag/174-a5dd795)
+  works too, without the recording and the controls list.
 - **A Linux desktop with a screen-sharing portal**: GNOME on Wayland is what this was built and measured
   on; X11 works through a fallback. Everything else comes from your distribution's own packages.
 - **A GPU that encodes H.264** (NVIDIA NVENC or Intel/AMD VA-API), or a CPU fast enough for x264.
@@ -38,7 +43,7 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.22.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.23.0_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
