@@ -7,7 +7,7 @@ Maintainer: TEE <github@teebug.de>
 Installed-Size: @INSTALLED_SIZE@
 Depends: python3 (>= 3.12), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-glib-2.0, python3-evdev, ffmpeg, gstreamer1.0-tools, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, xdg-desktop-portal, iproute2, xdg-utils, udev, libxkbcommon0
 Recommends: xdg-desktop-portal-gnome | xdg-desktop-portal-gtk, gnome-shell-extension-appindicator, x11-xserver-utils
-Homepage: https://github.com/mohasi/ps3-dev
+Homepage: https://github.com/TheErsysEnding/TEE-Cell-Stream-Server-Linux
 Description: TEE Cell Stream Server - stream the PC desktop to a PS3 (cell-stream)
  Linux port of cell-stream-server: captures the desktop (xdg-desktop-portal /
  PipeWire, X11 fallback), encodes H.264 on the GPU (NVENC, VA-API) or CPU
