@@ -37,8 +37,12 @@ GERMAN = {
         'TEE Cell Stream Server läuft (headless). Log: ',
     "a second copy was started - showing the running one's window":
         'eine zweite Kopie wurde gestartet - zeige das Fenster der laufenden',
+    'audio: %d AAC frames sent for recording (%d chunks, %d frames dropped)':
+        'audio: %d AAC-Frames für die Aufnahme gesendet (%d Häppchen, %d Frames verworfen)',
     'audio: %d packets sent (%d with no audio data, %d frames dropped)':
         'audio: %d Pakete gesendet (%d ohne Ton-Daten, %d Frames verworfen)',
+    'audio: no AAC encoder, recordings will be silent (%s)':
+        'audio: kein AAC-Encoder, Aufnahmen bleiben stumm (%s)',
     'audio: %s does not start (%s), trying %s': 'audio: %s startet nicht (%s), versuche %s',
     'audio: buffer over %dms, dropping the oldest down to %dms (latency guard)':
         'audio: Puffer über %dms, verwerfe Ältestes bis %dms (Latenzschutz)',

@@ -100,10 +100,16 @@ QUALITY_CRF = 20                 # x264's -crf for the "quality" mode: visually 
 # So decode cost RISES with the slice count while the bit cost does not (+0.13% at 4 slices, measured): each
 # slice costs the decoder a fixed setup and returns nothing. cellVdec does not divide its work by slice.
 #
-# What that does and does not settle: it rules out SLICE-level parallelism, not all of it. A decoder can also
-# split a single slice by macroblock row (a wavefront), and that would use extra SPUs without needing slices -
-# invisible to this test. So "does a 5th SPU help" is still open, and only building the console app with
-# VDEC_SPU_COUNT changed can answer it. The switch stays for exactly that comparison.
+# It rules out SLICE-level parallelism but not, on its own, all of it: a decoder can also split a single slice
+# by macroblock row (a wavefront), which would use extra SPUs without needing slices and would be invisible
+# here. That was tested separately and the answer is no. The console app was rebuilt with VDEC_SPU_COUNT at 5
+# and at 6 (6 is everything it reserves, sys_spu_initialize(6, 0)), each under its own title id so all three
+# could be compared back to back on the same console: decode time did not move, and neither did the residual
+# unsteadiness. cellVdec therefore does not divide its work at all - the four SPUs are pipeline STAGES, not
+# workers, and there is no fifth stage. Sony's sample saying "AVC uses 4 SPUs" is a statement of fact.
+#
+# So 22-30 ms of decode at 1920x1088 is simply what this decoder costs, and no setting on either side moves
+# it. The switch below stays because it is the control group if that ever turns out to be wrong.
 SLICE_COUNTS = (1, 2, 4)
 
 SINFO_LEVEL = 42                 # the floor: H.264 level 4.2 covers everything up to and including 1920x1088
@@ -138,6 +144,21 @@ AUDIO_PREBUFFER_MS = 20
 AUDIO_PREBUFFER_TIMEOUT_MS = 500
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_CHANNELS = 2
+
+# A second, compressed copy of the same sound, sent only so the PS3 can put it in a recording.
+#
+# The console cannot make this itself: its SDK ships decoders for AAC, ATRAC and MP3 but the only
+# ENCODERS in it are CELP, JPEG and PNG. And the XMB's video player will not take raw PCM in an MP4 -
+# measured on the console, a PCM track gives "incompatible file" while AAC and MP3 play. So the
+# compression has to happen here, where ffmpeg is already running anyway.
+#
+# It costs 128 kbit/s next to 12-40 Mbit/s of video, and the PS3 does nothing with these packets but
+# copy them into the file: no decode, no re-encode. Playback still uses the uncompressed AF packets,
+# which stay exactly as they were - this is additional, not a replacement.
+AUDIO_AAC_BITRATE_KBPS = 128
+AUDIO_AAC_SAMPLES_PER_FRAME = 1024    # AAC-LC is 1024 samples per frame, always
+AUDIO_AAC_MAX_FRAME_BYTES = 1024      # 128 kbit/s at 48 kHz averages ~340 B; this is generous headroom
+AUDIO_ADTS_HEADER_BYTES = 7           # stripped before sending: the muxer wants raw AAC
 
 # controller (CP): 20 bytes, PS3 -> server, 60/s
 PAD_PACKET_BYTES = 20

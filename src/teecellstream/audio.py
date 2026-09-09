@@ -12,6 +12,7 @@ packet layout (16-byte header, big-endian, must match stream.c on the PS3):
 """
 
 import os
+import queue
 import re
 import struct
 import subprocess
@@ -85,6 +86,22 @@ def _spawn(args, **kw) -> subprocess.Popen:
     return subprocess.Popen(args, **kw)
 
 
+def _end_process_quietly(process: subprocess.Popen) -> None:
+    """terminate, briefly wait, kill: ffmpeg treats SIGTERM like 'q' and leaves at once, but never trust it."""
+    try:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(STOP_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(STOP_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        pass   # a stop must never raise into the server's stop path; a stuck child is the kernel's problem now
+    # the pipes are closed by the threads reading them (they hit EOF now that the writer is dead):
+    # closing here could hand the fd number to the next ffmpeg while the old reader is about to read it
+
+
 def list_pulse_sources(ffmpeg_path: str) -> list[str]:
     """The pulse sources ffmpeg can see, in its own order. Empty when it cannot ask (no server, old build).
 
@@ -119,6 +136,170 @@ def build_af_packet(packet_id: int, frame_count: int, capture_us: int, samples: 
 
 def build_ainfo(sample_rate: int) -> bytes:
     return ("AINFO %d %d" % (sample_rate, CHANNELS)).encode("ascii")
+
+
+def build_aa_packet(packet_id: int, pts_us: int, frame: bytes) -> bytes:
+    """One AA datagram: a single raw AAC-LC frame, for the PS3's recorder only.
+
+    Same 16-byte header shape as AF so the console can read both with one struct. The frame-count
+    field is spent on the frame's byte length, which the receiver would otherwise have to infer from
+    the datagram size - true today, but not if a fragment header is ever added.
+    """
+    return _HEADER.pack(b"AA", packet_id & 0xFFFFFFFF, len(frame) & 0xFFFF,
+                        max(0, pts_us) & 0xFFFFFFFFFFFFFFFF) + frame
+
+
+class AacEncoder:
+    """Compresses the captured sound a second time, as AAC, purely so a PS3 recording can have audio.
+
+    The console has no AAC encoder - its SDK ships only CELP, JPEG and PNG - and the XMB's player
+    refuses raw PCM in an MP4. So this runs here, fed with exactly the same samples the AF packets
+    carry, which keeps the two copies bit-identical in content and lets both share one timeline.
+
+    Nothing here may ever block the send loop: it paces the whole audio stream, and a stall would gap
+    the sound the user actually hears for the sake of a recording that may not even be running. Both
+    directions therefore go through a bounded queue served by its own thread, and a full queue drops
+    rather than waits.
+    """
+
+    QUEUE_CHUNKS = 64          # ~320ms of 5ms chunks: far more than ffmpeg can fall behind
+    QUEUE_FRAMES = 128
+
+    def __init__(self, sample_rate: int, ffmpeg_path: str = "ffmpeg"):
+        self.sample_rate = sample_rate
+        self.ffmpeg_path = ffmpeg_path
+        self._process: subprocess.Popen | None = None
+        self._in_queue: queue.Queue[bytes | None] = queue.Queue(self.QUEUE_CHUNKS)
+        self._out_queue: queue.Queue[tuple[bytes, int]] = queue.Queue(self.QUEUE_FRAMES)
+        self._threads: list[threading.Thread] = []
+        self._base_us = 0
+        self._frames_out = 0
+        self.dropped_chunks = 0
+        self.dropped_frames = 0
+
+    def start(self, base_us: int) -> bool:
+        """base_us is the capture instant of the first sample that will be fed."""
+        self._base_us = base_us
+        # The four flags before the input are what make this stream at all. By default ffmpeg fills a
+        # 5 MB probe buffer before it processes anything - pointless for raw PCM, where there is
+        # nothing to probe - and hands over nothing until stdin closes. Measured: with a plain
+        # invocation 230 KB of input produced 0 bytes of output until EOF; with these, frames arrive
+        # while the stream runs. nobuffer and avioflags alone are not enough, probesize is the one
+        # that matters, and all four together were the only combination that worked.
+        args = [self.ffmpeg_path, "-hide_banner", "-loglevel", "error",
+                "-fflags", "nobuffer", "-avioflags", "direct",
+                "-probesize", "32", "-analyzeduration", "0",
+                "-f", "s16be", "-ar", str(self.sample_rate), "-ac", str(CHANNELS), "-i", "pipe:0",
+                "-c:a", "aac", "-b:a", "%dk" % protocol.AUDIO_AAC_BITRATE_KBPS,
+                # -flush_packets 1 for the same reason the video encoder needs it (encoders.py): without
+                # it ffmpeg holds finished frames in its output buffer and hands them over in bursts,
+                # which for a quiet passage means nothing arrives for seconds.
+                "-f", "adts", "-flush_packets", "1", "pipe:1"]
+        try:
+            self._process = _spawn(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL)
+        except OSError as error:
+            log.write(_("audio: no AAC encoder, recordings will be silent (%s)") % error)
+            return False
+        for target in (self._pump_in, self._pump_out):
+            thread = threading.Thread(target=target, daemon=True)
+            thread.start()
+            self._threads.append(thread)
+        return True
+
+    def feed(self, samples: bytes) -> None:
+        """Called from the send loop. Never blocks."""
+        if self._process is None:
+            return
+        try:
+            self._in_queue.put_nowait(samples)
+        except queue.Full:
+            self.dropped_chunks += 1
+
+    def take(self) -> tuple[bytes, int] | None:
+        try:
+            return self._out_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def stop(self) -> None:
+        process, self._process = self._process, None
+        if process is None:
+            return
+        try:
+            self._in_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        _end_process_quietly(process)
+
+    # ---------------------------------------------------------------- internals ----
+
+    def _pump_in(self) -> None:
+        process = self._process
+        while process is not None and process.poll() is None:
+            chunk = self._in_queue.get()
+            if chunk is None:
+                break
+            try:
+                process.stdin.write(chunk)
+                process.stdin.flush()
+            except (BrokenPipeError, ValueError, OSError):
+                break
+        try:
+            if process is not None and process.stdin:
+                process.stdin.close()
+        except OSError:
+            pass
+
+    def _pump_out(self) -> None:
+        """Splits ffmpeg's ADTS stream into frames and stamps each one."""
+        process = self._process
+        pending = bytearray()
+        header = protocol.AUDIO_ADTS_HEADER_BYTES
+        while process is not None and process.poll() is None:
+            try:
+                # read1, not read: read(n) blocks until it has all n bytes, so a quiet passage - where
+                # AAC frames are only a few dozen bytes - would sit here for seconds and deliver the
+                # sound in bursts. read1 hands over whatever one syscall produced.
+                block = process.stdout.read1(4096)
+            except (ValueError, OSError):
+                break
+            if not block:
+                break
+            pending += block
+            while len(pending) >= header:
+                if pending[0] != 0xFF or (pending[1] & 0xF0) != 0xF0:
+                    del pending[0]        # resynchronise: not an ADTS syncword
+                    continue
+                length = ((pending[3] & 0x03) << 11) | (pending[4] << 3) | (pending[5] >> 5)
+                if length < header or length > protocol.AUDIO_AAC_MAX_FRAME_BYTES:
+                    del pending[0]
+                    continue
+                if len(pending) < length:
+                    break
+                # protection_absent == 0 means a 2-byte CRC follows the header
+                skip = header + (0 if (pending[1] & 0x01) else 2)
+                frame = bytes(pending[skip:length])
+                del pending[:length]
+                self._emit(frame)
+        try:
+            if process is not None and process.stdout:
+                process.stdout.close()   # else the reader is left open and Python warns at collection
+        except OSError:
+            pass
+
+    def _emit(self, frame: bytes) -> None:
+        # ffmpeg's AAC encoder emits one frame of priming before any real audio (initial_padding =
+        # 1024 samples). Left uncorrected the recording's sound would run 21ms ahead of its picture -
+        # small, but exactly the kind of thing that is impossible to explain later.
+        samples = protocol.AUDIO_AAC_SAMPLES_PER_FRAME
+        offset = (self._frames_out * samples) - samples
+        self._frames_out += 1
+        pts_us = self._base_us + offset * 1_000_000 // self.sample_rate
+        try:
+            self._out_queue.put_nowait((frame, pts_us))
+        except queue.Full:
+            self.dropped_frames += 1
 
 
 class AudioCapture:
@@ -249,21 +430,7 @@ class AudioCapture:
         tail = re.sub(r"\[[^\]]*@ 0x[0-9a-f]+\] ", "", self._stderr_tail).strip().replace("\n", " | ")
         return ", " + tail[-300:] if tail else ""
 
-    @staticmethod
-    def _end_process(process: subprocess.Popen) -> None:
-        """terminate, briefly wait, kill: ffmpeg treats SIGTERM like 'q' and leaves at once, but never trust it."""
-        try:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(STOP_TIMEOUT_S)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(STOP_TIMEOUT_S)
-        except (OSError, subprocess.TimeoutExpired):
-            pass   # a stop must never raise into the server's stop path; a stuck child is the kernel's problem now
-        # the pipes are closed by the threads reading them (they hit EOF now that the writer is dead):
-        # closing here could hand the fd number to the next ffmpeg while the old reader is about to read it
+    _end_process = staticmethod(_end_process_quietly)
 
     # ------------------------------------------------------------------ threads
 
@@ -469,6 +636,22 @@ class AudioStreamer:
         start_us = now_us()
         packet_id = 0
         silent_packets = 0
+
+        # The compressed copy for the PS3's recorder. Its timeline is anchored to start_us, the same
+        # instant packet 0 is due, so the AAC frames and the video's capture stamps share one clock.
+        # If it will not start we simply stream without it: recordings are then silent, sound is not.
+        # Deliberately belt-and-braces: this is a convenience for recordings, and NOTHING about it may
+        # be able to stop the sound the user is listening to. The first version of this line reached
+        # for a self.ffmpeg_path that does not exist on this class, and the AttributeError killed the
+        # send thread after its first datagram - silence, for a feature nobody had switched on.
+        aac_packet_id = 0
+        try:
+            aac = AacEncoder(sample_rate, self.capture.ffmpeg_path)
+            if not aac.start(start_us):
+                aac = None
+        except Exception as error:                       # noqa: BLE001 - see above
+            log.write(_("audio: no AAC encoder, recordings will be silent (%s)") % error)
+            aac = None
         try:
             while self._streaming:
                 # packet N carries the sound due N chunks after we started
@@ -487,9 +670,25 @@ class AudioStreamer:
                     silent_packets += 1   # nothing captured: send silence, keep the clock going
 
                 self.sock.sendto(build_af_packet(packet_id, chunk_frames, now_us(), samples), target)
+
+                if aac is not None:
+                    aac.feed(samples)
+                    # drain whatever the encoder has finished; one 5ms chunk yields a frame every
+                    # fourth pass or so, and sending them as they appear keeps the datagrams small
+                    while (ready := aac.take()) is not None:
+                        frame, pts_us = ready
+                        self.sock.sendto(build_aa_packet(aac_packet_id, pts_us, frame), target)
+                        aac_packet_id += 1
+
                 if packet_id % packets_per_second == 0:
                     self.sock.sendto(info, target)
                 packet_id += 1
         except OSError as error:
             log.write(_("audio: sending aborted: %s") % error)
+        finally:
+            if aac is not None:
+                aac.stop()
         log.write(_("audio: %d packets sent (%d with no audio data, %d frames dropped)") % (packet_id, silent_packets, capture.dropped_frames))
+        if aac is not None:
+            log.write(_("audio: %d AAC frames sent for recording (%d chunks, %d frames dropped)")
+                      % (aac_packet_id, aac.dropped_chunks, aac.dropped_frames))

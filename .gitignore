@@ -6,6 +6,7 @@ dist/*.deb
 
 # working documents, not part of the package
 FUER-MOHASI-2.md
+ANTWORT-MOHASI-2.md
 NOTIZEN-offen.md
 KOMMENTAR-github.md
 ANTWORT-github.md
@@ -15,3 +16,11 @@ INTRO-psxplace.md
 POST-psxplace.txt
 DISCORD-post.md
 NACHRICHT-MOHASI-kurz.md
+
+# PS3-Seite und Arbeitsmaterial - gehoert nicht in das Serverpaket:
+# ps3-src ist mohasis Quelltext (nicht unserer zum Veroeffentlichen), ps3-max sind gebaute .pkg
+# und Aufnahmen (mehrere GB), ps3-tests sind Testvideos, branding sind Zwischenstaende.
+ps3-src/
+ps3-max/
+ps3-tests/
+branding/

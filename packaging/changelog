@@ -1,3 +1,24 @@
+tee-cell-stream-server (1.23.0) unstable; urgency=medium
+
+  * Der Server schickt den Ton jetzt ein zweites Mal mit, als AAC, damit eine
+    Aufnahme auf der PS3 ueberhaupt Ton haben kann. Die Konsole hat keinen
+    AAC-Encoder - im SDK gibt es nur CELP, JPEG und PNG - und ihr Videoplayer
+    weigert sich, rohes PCM in einer MP4 abzuspielen (auf der echten Konsole
+    gemessen: PCM ergibt "inkompatible Datei", AAC und MP3 laufen). Also
+    komprimiert der PC, wo ffmpeg ohnehin laeuft.
+  * Die Wiedergabe aendert sich nicht: sie laeuft weiter ueber die
+    unkomprimierten AF-Pakete. Die neuen AA-Pakete kosten 128 kbit/s neben
+    12-40 Mbit/s Video und werden von der Konsole nur in die Datei kopiert -
+    nicht dekodiert, nicht neu kodiert.
+  * Drei Fallstricke, die dabei gemessen und behoben wurden: ffmpeg gibt aus
+    einer Pipe gar nichts heraus, bis stdin schliesst, solange man ihm nicht
+    -fflags nobuffer -avioflags direct -probesize 32 -analyzeduration 0
+    mitgibt; ein read() auf die Ausgabe wartet auf die volle Blockgroesse und
+    braucht deshalb read1(); und der AAC-Encoder hat 1024 Samples Vorlauf, die
+    abgezogen werden muessen, sonst liegt der Ton 21 ms vor dem Bild.
+
+ -- TEE <github@teebug.de>  Wed, 09 Sep 2026 00:00:00 +0200
+
 tee-cell-stream-server (1.22.0) unstable; urgency=medium
 
   * Das Programm ist jetzt standardmaessig auf Englisch. Unter System ->
