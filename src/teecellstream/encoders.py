@@ -176,10 +176,10 @@ def _rate_args(kbps: int, rate_control: str = "vbr") -> list[str]:
             "-maxrate", "%dk" % (kbps * protocol.REFRESH_MAX_RATE_PERCENT // 100)] + tail
 
 
-def _gop_args(interval_seconds: int, fps: int) -> list[str]:
+def _gop_args(interval_seconds: float, fps: int) -> list[str]:
     """-g is the interval between keyframes (periodic-keyframe modes) or the length of a full refresh sweep
     (x264 and nvenc with intra refresh on - see the nvenc note in build_ffmpeg_args)."""
-    return ["-g", str(interval_seconds * fps)]
+    return ["-g", str(max(1, round(interval_seconds * fps)))]
 
 
 def _scale_filter(width: int, height: int, output_format: str) -> str:
@@ -221,6 +221,21 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
                  "-rc", "cbr" if rate_control == "cbr" else "vbr", "-pix_fmt", "yuv420p"]
         args += _coder_args(entropy_coder)
         args += NVENC_DELAY_ARGS
+        # h264_nvenc DOUBLES -refs into the SPS: max_num_ref_frames = 2 x refs (measured on a
+        # 4070 Ti SUPER: 1->2, 2->4, ... capped at 14). So our own "-refs 1" is what made the
+        # stream advertise TWO reference frames while every slice actually used one - all PPS carry
+        # num_ref_idx_l0_default_active_minus1 = 0 and no slice overrides it. The PS3 sizes its
+        # decoded-picture buffer from that advertisement (decode-h264.c: maxRefFrames + 1), so it
+        # allocated three buffers where x264's honest SPS gets two.
+        #
+        # -dpb_size is the only option that corrects it; -refs, -rc-lookahead, -surfaces,
+        # -zerolatency and -no-scenecut all leave the SPS untouched. It rewrites 4 bytes of SPS and
+        # nothing else: the slice data is bit-identical and the decoded pixels hash the same.
+        #
+        # It must stay paired with refs = 1. -dpb_size lowers the advertisement WITHOUT constraining
+        # the encoder, so raising -refs while this is set would produce a non-conformant stream that
+        # starves exactly the DPB the PS3 sized from it.
+        args += ["-dpb_size", "1"]
         args += _rate_args(kbps, "cbr" if rate_control == "cbr" else "vbr")
         if intra:
             # ffmpeg's nvenc wrapper turns -g into the SWEEP once intra refresh is on (nvenc.c: intraRefreshPeriod =
@@ -233,7 +248,7 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
             args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
             args += ["-intra-refresh", "1", "-single-slice-intra-refresh", "1"]
         else:
-            args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
+            args += _gop_args(protocol.KEYFRAME_INTERVAL_SECONDS, fps)
         args += ["-color_range", "tv", "-colorspace", "bt709", "-forced-idr", "1"]
         args += _OUTPUT
         return args
@@ -253,7 +268,7 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
         # undo it (verified: "ffmpeg -h encoder=h264_vaapi" -> "-coder ... (default cabac)").
         args += _coder_args(entropy_coder)
         args += _rate_args(kbps)   # VA-API stays on VBR: no Intel/AMD card here to prove anything else on
-        args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
+        args += _gop_args(protocol.KEYFRAME_INTERVAL_SECONDS, fps)
         args += _OUTPUT
         return args
 
@@ -280,7 +295,9 @@ def build_ffmpeg_args(ffmpeg_path: str, encoder: VideoEncoder, capture_input_arg
                  % (max(1, slices), 1 if intra else 0, _HRD_PARAM.get(rate_control, _HRD_DEFAULT))]
         args += _coder_args(entropy_coder)
         args += _rate_args(kbps, rate_control)
-        args += _gop_args(protocol.REFRESH_SWEEP_SECONDS, fps)
+        # one line, two meanings: with intra refresh -g is the sweep length,
+        # without it the interval between IDRs - and that interval IS the freeze
+        args += _gop_args(protocol.REFRESH_SWEEP_SECONDS if intra else protocol.KEYFRAME_INTERVAL_SECONDS, fps)
         args += _OUTPUT
         return args
 

@@ -170,6 +170,24 @@ WATCHDOG_TICK_MS = 500
 
 # encoder tuning (see upstream/server/LiveStreamer.cs for the measurements behind these)
 REFRESH_SWEEP_SECONDS = 1
+
+# How often a KEYFRAME-mode stream sends an IDR. Not the same concept as the sweep above, though the
+# two shared one constant until now.
+#
+# It matters because of what the PS3 does after a loss: stream.c sets waitingForKeyframe and then
+# discards every picture until the next IDR, so this interval IS the worst-case freeze. Measured in a
+# 27-second console recording at the old 1 second: five gaps of 117/399/447/466/499 ms, each ending
+# exactly on an IDR.
+#
+# Measured cost of halving it (1920x1088, 60 fps, 41 Mbit/s, real game content, x264 ultrafast):
+#   1.0 s -> 41085 kbps, largest access unit 390 KB
+#   0.5 s -> 41422 kbps (+0.8 %), largest access unit 389 KB
+#   0.25 s -> 42473 kbps (+3.4 %), largest access unit 389 KB
+# The burst does NOT grow - rate control caps the IDR - so a shorter interval does not cause more of
+# the queue overruns it is meant to recover from. 0.5 s is the conservative step: it halves the freeze
+# for under one percent, and only doubles the IDR rate rather than quadrupling what the send pacing
+# has to carry.
+KEYFRAME_INTERVAL_SECONDS = 0.5
 ANCHOR_KEYFRAME_SECONDS = 3600
 REFRESH_MAX_RATE_PERCENT = 140
 REFRESH_BUFFER_MS = 250

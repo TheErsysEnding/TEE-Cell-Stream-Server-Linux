@@ -1,3 +1,65 @@
+tee-cell-stream-server (1.26.0) unstable; urgency=medium
+
+  * Im Keyframe-Modus kommt jetzt alle 0,5 s ein IDR statt jede Sekunde.
+    Der Grund liegt auf der Konsole: nach einem verworfenen Bild wirft die
+    PS3 alles weg, bis das naechste IDR kommt - dieser Abstand IST also der
+    schlimmstmoegliche Standbild-Moment. In einer 27-Sekunden-Aufnahme
+    waren das fuenf Luecken von 117 bis 499 ms, jede endete exakt auf einem
+    IDR.
+  * Gemessen bei 1920x1088, 60 fps, 41 Mbit/s an echtem Spielmaterial:
+    1,0 s -> 41085 kbps, groesste Zugriffseinheit 390 KB
+    0,5 s -> 41422 kbps (+0,8 %), groesste Zugriffseinheit 389 KB
+    Der Schub waechst also NICHT - die Ratenkontrolle deckelt das IDR -,
+    also verursacht der kuerzere Abstand nicht mehr von den Ueberlaeufen,
+    gegen die er hilft.
+  * Dafuer sind zwei Begriffe getrennt worden, die sich bisher eine
+    Konstante teilten: REFRESH_SWEEP_SECONDS ist die Laenge des
+    Intra-Refresh-Durchlaufs und bleibt bei 1 s, KEYFRAME_INTERVAL_SECONDS
+    ist der Abstand der IDRs im Keyframe-Modus. Bei x264 stand beides in
+    derselben Zeile; sie haengt jetzt am Modus.
+  * Kein echtes Keyframe auf Anfrage: der laufende ffmpeg-Unterprozess
+    kennt dafuer keinen Weg. -force_key_frames nimmt nur Zeitpunkte und
+    Ausdruecke ueber n und t, und zmq beziehungsweise sendcmd erreichen
+    nur Filter-, nie Encoder-Optionen.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 01:45:00 +0200
+
+tee-cell-stream-server (1.25.0) unstable; urgency=medium
+
+  * NVENC kuendigt der PS3 nicht mehr zwei Referenzbilder an, wenn es nur
+    eines benutzt. h264_nvenc VERDOPPELT -refs in den SPS (gemessen auf
+    einer 4070 Ti SUPER: 1 wird 2, 2 wird 4, gedeckelt bei 14), unser
+    eigenes "-refs 1" war also die Ursache. Die PS3 legt ihren Bildpuffer
+    nach dieser Ankuendigung an und nahm drei Puffer statt der zwei, die
+    x264s ehrliche SPS ergibt.
+  * Behoben mit "-dpb_size 1" - die einzige Option, die das Feld bewegt;
+    -refs, -rc-lookahead, -surfaces, -zerolatency und -no-scenecut lassen
+    die SPS unveraendert. Sie schreibt vier Bytes um und sonst nichts: die
+    Bilddaten sind bitgleich, die dekodierten Pixel haben denselben Hash.
+  * Sie muss mit refs = 1 gepaart bleiben. -dpb_size senkt die Ankuendigung,
+    ohne den Encoder zu beschraenken - mit erhoehtem -refs entstuende ein
+    nicht konformer Strom, der genau den so bemessenen Puffer aushungert.
+
+ -- TEE <github@teebug.de>  Wed, 09 Sep 2026 23:20:00 +0200
+
+tee-cell-stream-server (1.24.0) unstable; urgency=medium
+
+  * SINFO nennt jetzt zusaetzlich den Encoder, den der Server fahren
+    will ("x264", "nvenc", "vaapi"). Die PS3 zeigt ihn in der Statistik
+    an und schreibt ihn in ihr Sitzungsprotokoll, damit eine Messung
+    hinterher noch sagen kann, womit sie aufgenommen wurde - bisher
+    stand das nirgends und musste erinnert werden.
+  * Die Erweiterung ist in beide Richtungen vertraeglich: der Parser
+    der PS3 liest sechs Zahlen und hoert dann auf, ein aelteres
+    Konsolen-Programm ignoriert das angehaengte Wort also; eine neuere
+    Konsole zeigt "-", wenn ein aelterer Server es weglaesst.
+  * Wie beim Intra-Refresh-Flag ist es eine Ankuendigung, keine
+    Messung: SINFO geht raus, bevor ffmpeg laeuft. Fragt die PS3
+    spaeter erneut, waehrend eine Sitzung schon laeuft, bekommt sie den
+    tatsaechlich benutzten Encoder statt den geplanten.
+
+ -- TEE <github@teebug.de>  Wed, 09 Sep 2026 22:45:00 +0200
+
 tee-cell-stream-server (1.23.0) unstable; urgency=medium
 
   * Der Server schickt den Ton jetzt ein zweites Mal mit, als AAC, damit eine

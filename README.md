@@ -60,10 +60,37 @@ While streaming, every button goes to the PC, so the PS3 app uses SELECT as its 
 
 | Combination | What it does |
 |---|---|
-| SELECT + Cross | input mode: mouse+keyboard ↔ gamepad |
+| SELECT + R3 | input mode: mouse+keyboard ↔ gamepad |
 | SELECT + Square | presentation mode: vsync off → vsync → vsync + one-frame buffer |
-| SELECT + R3 | show/hide the stats panel |
+| SELECT + L3 | show/hide the stats panel |
+| SELECT + L2 | start/stop recording to XMB → Video |
 | SELECT + Triangle/Circle/L1/R1 | custom commands 1–4 |
+
+Triangle on the waiting screen shows the full list, read from your own `settings.txt`.
+
+### A moving seam across the picture is not a fault
+
+In **vsync off** the console shows each picture the moment it is decoded, without waiting for the
+television's next refresh. That is where the lowest latency comes from, and it costs a tear: the
+display is repainted mid-picture, so a seam appears where the old and new frames meet.
+
+The seam *moves*, and how fast tells you what is happening. Measured over 61 seconds of a clean
+session: the console received 59.10 pictures per second against a 60 Hz display, a difference of
+0.90 — so the seam swept through the picture once every 1.1 seconds, which is exactly how often it
+was seen. Get the rate closer to the display's and the seam slows down; match it exactly and it
+stands still, which is why it is invisible on some setups and obvious on others.
+
+It shows up most on a **still** picture in keyframe mode. Consecutive predicted frames reproduce the
+previous picture almost exactly, so a seam between two of them is invisible — but a keyframe is coded
+from scratch and lands on slightly different pixel values, and that difference is what you see. With
+intra refresh there is no keyframe after the first, so it happens far more rarely.
+
+If it bothers you, **SELECT + Square** once or twice: *vsync* waits for the refresh and removes the
+tear for about one frame period of latency, and *vsync + one-frame buffer* additionally rides out
+frames that arrive late, for one more. The choice is saved.
+
+The stats panel tells you which case you are in: `Display:` near 0 ms means vsync is off, and
+`Framerate:` shows what actually arrives against what the source promised.
 
 **Language.** The window is English by default. *System → Language* switches it to German and back, and it
 changes over immediately — no restart. Log lines are translated as they are written, so lines already in

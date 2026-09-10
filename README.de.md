@@ -56,10 +56,39 @@ Während des Streams gehen **alle Tasten an den PC**; die App nutzt SELECT als M
 
 | Kombination | Wirkung |
 |---|---|
-| SELECT + Kreuz | Eingabemodus: Maus+Tastatur ↔ Gamepad |
+| SELECT + R3 | Eingabemodus: Maus+Tastatur ↔ Gamepad |
 | SELECT + Quadrat | Stream-Modus: vsync aus → vsync → vsync + 1 Frame Puffer |
-| SELECT + R3 | Statistik-Panel ein/aus |
+| SELECT + L3 | Statistik-Panel ein/aus |
+| SELECT + L2 | Aufnahme starten/stoppen (landet im XMB unter Video) |
 | SELECT + Dreieck/Kreis/L1/R1 | Custom-Befehl 1–4 (Reiter *Befehle*, Standard 1 = Steam Big Picture) |
+
+Dreieck auf dem Wartebildschirm zeigt die vollständige Liste – gelesen aus deiner eigenen `settings.txt`.
+
+### Eine wandernde Kante im Bild ist kein Fehler
+
+Bei **vsync aus** zeigt die Konsole jedes Bild in dem Moment, in dem es fertig dekodiert ist, ohne auf
+den nächsten Bildaufbau des Fernsehers zu warten. Daher kommt die niedrigste Latenz, und sie kostet
+eine Bruchkante: Der Bildschirm wird mitten im Aufbau neu beschrieben, und wo altes und neues Bild
+aufeinandertreffen, sieht man einen Saum.
+
+Die Kante *wandert*, und wie schnell, verrät den Grund. Gemessen über 61 saubere Sekunden: Die Konsole
+bekam 59,10 Bilder pro Sekunde bei einem 60-Hz-Fernseher, also 0,90 Differenz – die Kante wanderte
+demnach einmal alle 1,1 Sekunden durchs Bild, und genau so oft war sie zu sehen. Je näher die Bildrate
+an der des Fernsehers liegt, desto langsamer wandert sie; bei exakter Übereinstimmung steht sie still.
+Deshalb fällt sie auf manchen Anlagen gar nicht auf und auf anderen sofort.
+
+Am deutlichsten zeigt sie sich bei **stehendem Bild im Keyframe-Modus**. Aufeinanderfolgende
+Zwischenbilder wiederholen das vorige Bild fast exakt, eine Kante zwischen zweien davon sieht man
+nicht – ein Keyframe wird dagegen neu berechnet und landet auf minimal anderen Pixelwerten, und
+genau diese Differenz wird sichtbar. Bei Intra Refresh gibt es nach dem ersten Bild kein Keyframe
+mehr, deshalb passiert es dort viel seltener.
+
+Wenn sie stört: **SELECT + Quadrat** ein- oder zweimal. *vsync* wartet auf den Bildaufbau und nimmt
+die Kante weg, für etwa eine Bildperiode Latenz; *vsync + 1 Bild Puffer* fängt zusätzlich verspätete
+Bilder ab, für eine weitere. Die Wahl wird gespeichert.
+
+Woran du erkennst, worin du bist: Im Statistik-Panel steht `Display:` bei vsync aus nahe 0 ms, und
+`Framerate:` zeigt, was tatsächlich ankommt gegen das, was die Quelle versprochen hat.
 
 **Sprache.** Das Fenster ist standardmäßig auf Englisch. Unter *System → Sprache* stellst du auf Deutsch um
 und zurück – die Umstellung ist sofort sichtbar, ohne Neustart. Log-Zeilen werden beim Schreiben übersetzt;

@@ -188,15 +188,27 @@ class LiveStreamer:
         candidates = self._encoders_to_try()
         return encoders.intra_refresh_enabled(candidates[0] if candidates else None, self._loss_recovery())
 
+    def _announced_kind(self) -> str:
+        """Which encoder the ladder will try first. Same discipline as the intra flag: SINFO goes out
+        before ffmpeg is up, so this says what we intend to run, not what ran. A PS3 that asks again
+        after a rung has started gets the real one."""
+        candidates = self._encoders_to_try()
+        return candidates[0].kind if candidates else "unknown"
+
     def send_stream_info(self, target) -> None:
         session = self._session
         if session is not None and session.active and session.target == target:
             intra, width, height = session.intra, session.width, session.height
+            # once a rung has actually started, say which one rather than which one we meant to use
+            kind = session.encoder.kind if session.encoder is not None else self._announced_kind()
         else:
             intra = self._announced_intra()
             width, height = self._current_size()
-        info = ("SINFO %d %d %d %d %d %d" % (width, height, self._level_for(width, height), protocol.SINFO_REFS,
-                                            self._fps, 1 if intra else 0)).encode("ascii")
+            kind = self._announced_kind()
+        # The trailing encoder name is an extension. The PS3's parser reads six numbers and stops, so an
+        # older console ignores it; a newer console shows "-" when an older server leaves it out.
+        info = ("SINFO %d %d %d %d %d %d %s" % (width, height, self._level_for(width, height), protocol.SINFO_REFS,
+                                                self._fps, 1 if intra else 0, kind)).encode("ascii")
         try:
             for _ in range(3):
                 self._sock.sendto(info, target)

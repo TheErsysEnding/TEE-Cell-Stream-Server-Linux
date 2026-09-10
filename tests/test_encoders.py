@@ -33,7 +33,11 @@ HEAD = [FF, "-hide_banner", "-loglevel", "warning"]
 RATE = ["-b:v", "10000k", "-maxrate", "14000k", "-bufsize", "2500k", "-bf", "0", "-refs", "1"]
 OUT = ["-f", "h264", "-flush_packets", "1", "pipe:1"]
 SCALE = "scale=1280:720:flags=lanczos:out_color_matrix=bt709:out_range=tv"
-NVENC_CODEC = ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-rc", "vbr", "-pix_fmt", "yuv420p", "-delay", "0"]
+NVENC_CODEC = ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-rc", "vbr", "-pix_fmt", "yuv420p",
+               "-delay", "0",
+               # h264_nvenc doubles -refs into the SPS, so the stream advertised two reference frames
+               # while using one, and the PS3 sized its buffer from the advertisement
+               "-dpb_size", "1"]
 NVENC_TAIL = ["-color_range", "tv", "-colorspace", "bt709", "-forced-idr", "1"]
 X264_CODEC = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
               "-threads", "1"]   # frame threading would buffer ~one frame per core: 433 ms measured
@@ -299,7 +303,7 @@ class ArgumentTests(unittest.TestCase):
 
     def test_nvenc_keyframes(self):
         self.assertEqual(_build(NVENC, "keyframe"),
-                         HEAD + RAW_INPUT + NVENC_CODEC + RATE + ["-g", "60"] + NVENC_TAIL + OUT)
+                         HEAD + RAW_INPUT + NVENC_CODEC + RATE + ["-g", "30"] + NVENC_TAIL + OUT)
 
     def test_nvenc_x11grab_scales_on_the_cpu(self):
         self.assertEqual(_build(NVENC, "intra", X11_INPUT, True),
@@ -308,14 +312,14 @@ class ArgumentTests(unittest.TestCase):
 
     def test_vaapi_always_keyframes(self):
         expected = (HEAD + ["-vaapi_device", "/dev/dri/renderD128"] + RAW_INPUT + ["-vf", "format=nv12,hwupload"]
-                    + ["-c:v", "h264_vaapi"] + RATE + ["-g", "60"] + OUT)
+                    + ["-c:v", "h264_vaapi"] + RATE + ["-g", "30"] + OUT)
         self.assertEqual(_build(VAAPI, "intra"), expected)
         self.assertEqual(_build(VAAPI, "keyframe"), expected)
 
     def test_vaapi_x11grab(self):
         self.assertEqual(_build(VAAPI, "intra", X11_INPUT, True),
                          HEAD + ["-vaapi_device", "/dev/dri/renderD128"] + X11_INPUT
-                         + ["-vf", SCALE + ",format=nv12,hwupload"] + ["-c:v", "h264_vaapi"] + RATE + ["-g", "60"] + OUT)
+                         + ["-vf", SCALE + ",format=nv12,hwupload"] + ["-c:v", "h264_vaapi"] + RATE + ["-g", "30"] + OUT)
 
     def test_x264_intra_refresh(self):
         self.assertEqual(_build(X264, "intra"),
@@ -325,7 +329,7 @@ class ArgumentTests(unittest.TestCase):
     def test_x264_keyframes(self):
         self.assertEqual(_build(X264, "keyframe"),
                          HEAD + RAW_INPUT + X264_CODEC + ["-x264-params", "sliced-threads=0:slices=1:intra-refresh=0:nal-hrd=vbr"]
-                         + RATE + ["-g", "60"] + OUT)
+                         + RATE + ["-g", "30"] + OUT)
 
     def test_x264_x11grab(self):
         self.assertEqual(_build(X264, "intra", X11_INPUT, True),
@@ -458,7 +462,10 @@ class ProbeOnThisMachineTests(unittest.TestCase):
     def test_nvenc_keyframe_mode_really_sends_periodic_idr(self):
         stream = self._encode_still_frames(NVENC, "keyframe", 150)
         types = [t for t in _nal_types(stream) if t in (1, 5)]
-        self.assertEqual([i for i, t in enumerate(types) if t == 5], [0, 60, 120], "IDR jede Sekunde erwartet")
+        # every 0.5 s since KEYFRAME_INTERVAL_SECONDS was split off from the refresh sweep: this
+        # interval is the worst-case freeze on the PS3 after a dropped frame
+        self.assertEqual([i for i, t in enumerate(types) if t == 5], [0, 30, 60, 90, 120],
+                         "IDR alle 0,5 s erwartet")
 
     def test_x264_intra_refresh_really_sweeps_without_keyframes(self):
         stream = self._encode_still_frames(X264, "intra", 150)
@@ -523,7 +530,7 @@ class BitstreamTests(unittest.TestCase):
         if expect_intra:
             self.assertEqual(keyframes, [0], "%s: Intra-Refresh sendet nur das eine Anker-IDR: %r" % (tag, keyframes))
         else:
-            self.assertEqual(keyframes, [0, 60], "%s: Keyframe-Modus: IDR jede Sekunde: %r" % (tag, keyframes))
+            self.assertEqual(keyframes, [0, 30, 60], "%s: Keyframe-Modus: IDR alle 0,5 s: %r" % (tag, keyframes))
         return sps, pps
 
     def _run_matrix(self, encoder, default_entropy):

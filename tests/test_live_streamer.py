@@ -402,7 +402,7 @@ class LiveStreamerTests(unittest.TestCase):
 
         first_vf = self._collect(10.0, frames, texts, stop_at_first_vf=True)
         self.assertIsNotNone(first_vf, "kein VF-Fragment innerhalb 10 s. Log:\n" + log.get_recent())
-        self.assertEqual(texts[:3], ["SINFO 1280 720 42 1 60 1"] * 3, "SINFO muss 3x vor dem ersten Frame kommen")
+        self.assertEqual(texts[:3], ["SINFO 1280 720 42 1 60 1 " + self.best.kind] * 3, "SINFO muss 3x vor dem ersten Frame kommen")
         self._collect(3.0, frames, texts)
 
         session = streamer._session
@@ -500,7 +500,7 @@ class LiveStreamerTests(unittest.TestCase):
         # everything since the first PLAY is still queued in the receiver: 3 SINFO per PLAY, then video
         texts, frames = [], Reassembler()
         self._collect(1.5, frames, texts)
-        self.assertEqual(texts, ["SINFO 1280 720 42 1 60 1"] * 9, texts)
+        self.assertEqual(texts, ["SINFO 1280 720 42 1 60 1 " + self.best.kind] * 9, texts)
         self.assertGreater(len(frames.frames), 0, "kein Frame. Log:\n" + log.get_recent())
         self.assertTrue(streamer.is_streaming)
         self.assertEqual(streamer._session.process.pid, pid_before, "ffmpeg wurde neu gestartet")
@@ -526,7 +526,7 @@ class LiveStreamerTests(unittest.TestCase):
         other_texts, other_frames = [], Reassembler()
         self.assertIsNotNone(self._collect(10.0, other_frames, other_texts, stop_at_first_vf=True, receiver=other),
                              "kein Frame an das neue Ziel. Log:\n" + log.get_recent())
-        self.assertEqual(other_texts[:3], ["SINFO 1280 720 42 1 60 1"] * 3)
+        self.assertEqual(other_texts[:3], ["SINFO 1280 720 42 1 60 1 " + self.best.kind] * 3)
         self.assertTrue(other_frames.frames[0][1] if other_frames.frames else True)
         streamer.stop()
         recent = log.get_recent()
@@ -639,7 +639,7 @@ class LiveStreamerTests(unittest.TestCase):
         first_vf = self._collect(15.0, frames, texts, stop_at_first_vf=True)
         self.assertIsNotNone(first_vf, "kein Frame vom Ersatz-Encoder. Log:\n" + log.get_recent())
         # SINFO described the first candidate (VA-API: no intra refresh) - the PS3 reads it only before streaming
-        self.assertEqual(texts[:3], ["SINFO 1280 720 42 1 60 0"] * 3)
+        self.assertEqual(texts[:3], ["SINFO 1280 720 42 1 60 0 " + vaapi.kind] * 3)
         # ... so the rung that actually streams must keep that promise: periodic keyframes, not an
         # intra-refresh stream the PS3 would freeze on after its first loss
         self._collect(1.5, frames, texts)
@@ -660,9 +660,12 @@ class LiveStreamerTests(unittest.TestCase):
         self.assertIsNotNone(self._collect(10.0, frames, texts, stop_at_first_vf=True), log.get_recent())
         self._collect(1.5, frames, texts)
         streamer.stop()
-        self.assertEqual(texts[:3], ["SINFO 1280 720 42 1 60 0"] * 3)
+        self.assertEqual(texts[:3], ["SINFO 1280 720 42 1 60 0 " + self.best.kind] * 3)
         keyframe_ids = [frame[0] for frame in frames.frames if frame[1]]
-        self.assertEqual(keyframe_ids[:2], [0, 60], "Keyframe-Modus: IDR jede Sekunde erwartet, bekam %r" % keyframe_ids[:5])
+        # 0.5 s apart since KEYFRAME_INTERVAL_SECONDS was split off from REFRESH_SWEEP_SECONDS -
+        # this interval is the worst-case freeze on the PS3 after a dropped frame
+        self.assertEqual(keyframe_ids[:2], [0, 30],
+                         "Keyframe-Modus: IDR alle 0,5 s erwartet, bekam %r" % keyframe_ids[:5])
 
     # a rung that genuinely came to nothing counts even if a STOP lands during the next one - otherwise a
     # ladder that fails slower than the watchdog's grace would never trip the fuse
