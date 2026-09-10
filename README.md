@@ -157,17 +157,21 @@ nothing is confirmed within 15 seconds the previous mode is restored by itself.
 The two knobs do different jobs, and the session logs say so plainly. Taken across every rate that has
 been streamed to the console:
 
-| size | fps | frame gap | reported "decode" | minus the gap | display wait |
+| size | fps | frame gap | reported "decode" (median … p90) | minus the gap | display wait |
 |---|---|---|---|---|---|
-| 1920×1088 | 30 | 33.3 ms | 38.9 ms | **5.6 ms** | 0.0 ms |
-| 1920×1088 | 50 | 20.0 ms | 25.5 ms | **5.5 ms** | 0.0 ms |
-| 1920×1080 | 60 | 16.7 ms | 22.5 ms | **5.8 ms** | 0.0 ms |
-| 1280×720 | 120 | 8.3 ms | 12.1 ms | **3.8 ms** | 0.0 ms |
-| 1280×720 | 145 | 6.9 ms | 10.7 ms | **3.8 ms** | 7.8 ms |
-| 960×544 | 240 | 4.2 ms | 7.8 ms | **3.6 ms** | 7.4 ms |
+| 1920×1088 | 30 | 33.3 ms | 38.9 … 39.5 ms | **5.6 ms** | 0.0 ms |
+| 1920×1088 | 50 | 20.0 ms | 25.5 … 27.8 ms | **5.5 ms** | 0.0 ms |
+| 1920×1080 | 60 | 16.7 ms | 22.5 … 25.2 ms | **5.8 ms** | 0.0 ms |
+| 1280×720 | 120 | 8.3 ms | 12.1 … 13.0 ms | **3.8 ms** | 0.0 ms |
+| 1280×720 | 145 | 6.9 ms | 10.6 … 12.5 ms | **3.7 ms** | 7.8 ms |
+| 960×544 | 240 | 4.2 ms | 7.7 … 9.0 ms | **3.5 ms** | 7.4 ms |
 
-Subtract one frame interval from the reported decode time and what is left is 3.6–7.6 ms, at every rate
-and every resolution — Full HD included. What the stats panel calls `decode` is therefore mostly *waiting
+Both figures matter: the median is what the stats panel sits at, the 90th percentile is what it shows when
+something is actually moving. Quoting only the median invites an argument with anyone reading their own
+screen — at 544p/240 the panel reads 9 ms often enough to be the number people remember.
+
+Subtract one frame interval from the median and what is left is 3.5–5.8 ms, at every rate and every
+resolution — Full HD included. What the stats panel calls `decode` is therefore mostly *waiting
 for the next picture*: the Cell's actual decoding work is under 8 ms even at 1080p.
 
 That is why frame rate moves latency so hard. Every stage of the chain hands over whole pictures, so every
