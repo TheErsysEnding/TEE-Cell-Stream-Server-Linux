@@ -133,7 +133,7 @@ class InputArgsTests(unittest.TestCase):
         cap.width, cap.height, cap.fps = W, H, FPS
         self.assertEqual(cap.ffmpeg_input_args(), [
             "-probesize", "32", "-analyzeduration", "0",
-            "-f", "rawvideo", "-pix_fmt", "yuv420p", "-video_size", "1280x720", "-framerate", "60", "-i", "pipe:0"])
+            "-f", "rawvideo", "-pix_fmt", "yuv420p", "-video_size", "1280x720", "-framerate", "60/1", "-i", "pipe:0"])
         self.assertFalse(cap.needs_scale)
         self.assertEqual(cap.name, "test")
         self.assertEqual(capture.PortalCapture().name, "portal")
@@ -149,7 +149,7 @@ class InputArgsTests(unittest.TestCase):
             self.assertTrue(cap.start(W, H, FPS))
             args = cap.ffmpeg_input_args()
             self.assertEqual(args[:2], ["-f", "x11grab"])
-            self.assertEqual(args, ["-f", "x11grab", "-framerate", "60", "-draw_mouse", "1", "-i", ":7"])
+            self.assertEqual(args, ["-f", "x11grab", "-framerate", "60/1", "-draw_mouse", "1", "-i", ":7"])
             self.assertEqual(cap.captured_fps, FPS)
             started = time.monotonic()
             cap.feed(None)   # must return at once: ffmpeg reads the screen itself
@@ -532,6 +532,45 @@ class PortalCaptureWithFakeSessionTests(_FakeSessionBase):
         os.environ["TEE_CST_TEST_SOURCE"] = "1"
         self.assertIsInstance(capture.create_capture(), capture.TestCapture)   # wins over everything
         self.assertEqual(FakeSession.instances, [], "selection must not open a session")
+
+    def test_named_backend_wins_when_it_can_run(self):
+        os.environ["TEE_CST_CAPTURE"] = "test"
+        self.addCleanup(os.environ.pop, "TEE_CST_CAPTURE", None)
+        self.assertIsInstance(capture.create_capture(), capture.TestCapture)   # even without TEE_CST_TEST_SOURCE
+
+    def test_an_unusable_named_backend_falls_back_instead_of_failing(self):
+        """The whole point of naming one: asking for a path that is not ready must still leave a working
+        stream behind, not a source that says False at every PLAY."""
+        os.environ["TEE_CST_CAPTURE"] = "kms"
+        self.addCleanup(os.environ.pop, "TEE_CST_CAPTURE", None)
+        original = capture.KmsCapture.__dict__["unavailable_reason"]
+        capture.KmsCapture.unavailable_reason = classmethod(lambda cls: "nicht auf diesem PC")
+        self.addCleanup(setattr, capture.KmsCapture, "unavailable_reason", original)
+        self.assertIsInstance(capture.create_capture(), capture.PortalCapture)
+
+    def test_an_unknown_name_falls_back_too(self):
+        os.environ["TEE_CST_CAPTURE"] = "obs"
+        self.addCleanup(os.environ.pop, "TEE_CST_CAPTURE", None)
+        self.assertIsInstance(capture.create_capture(), capture.PortalCapture)
+
+    def test_the_placeholder_paths_say_what_stops_them(self):
+        """A placeholder that pretends to work would waste a stream. Both must refuse start() and name a
+        reason - and the names have to stay the ones TEE_CST_CAPTURE takes."""
+        for key in ("kms", "nvfbc"):
+            backend = capture.BACKENDS[key]()
+            self.assertFalse(backend.start(1280, 720, 60), key + " must not claim to have started")
+            self.assertTrue(backend.unavailable_reason(), key + " must say why not")
+            self.assertEqual(0, backend.captured_fps)
+            backend.stop()
+
+    def test_kmsgrab_records_the_input_it_would_use(self):
+        """The placeholder is only worth having if it keeps the shape of the finished path."""
+        backend = capture.KmsCapture()
+        backend.start(1280, 720, 59.94)
+        args = backend.ffmpeg_input_args()
+        self.assertIn("kmsgrab", args)
+        self.assertIn("60000/1001", args)        # the same fraction the other sources send
+        self.assertTrue(backend.needs_scale)     # the scanout plane is the whole screen
 
 
 
@@ -1562,10 +1601,13 @@ class SmoothnessReport(unittest.TestCase):
     """60 pictures a second can still judder: the count says nothing about how evenly spaced their content
     is. These are the four shapes the report has to tell apart."""
 
-    def _report(self, gaps, fps=60):
+    def _report(self, gaps, fps=60, arrivals=None):
         instance = capture.PortalCapture.__new__(capture.PortalCapture)
         instance.fps = fps
         instance._content_gaps_ms = list(gaps)
+        # the report reads the arrival rhythm too; empty means "not enough to say", which is what
+        # these cases want - they are about the CONTENT gaps
+        instance._arrival_gaps_ms = list(arrivals or [])
         return instance.smoothness_report()
 
     def test_an_even_stream_reads_as_fully_in_time(self):

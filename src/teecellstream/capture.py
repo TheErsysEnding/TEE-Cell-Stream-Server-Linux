@@ -12,13 +12,14 @@ a slot with nothing new re-sends the last one, which also keeps the PS3 (2 s wit
 is gone" to it) and the intra-refresh sweep going.
 """
 
+import ctypes.util
 import fcntl
 import os
 import subprocess
 import threading
 import time
 
-from . import log, portal
+from . import log, portal, protocol
 from .settings import settings
 from .i18n import _
 
@@ -127,8 +128,14 @@ class ScreenCapture:
     def __init__(self):
         self.captured_fps = 0  # frames the source delivered in the last second (statistics only)
 
-    def start(self, width: int, height: int, fps: int) -> bool:
+    def start(self, width: int, height: int, fps: float) -> bool:
         return False
+
+    @classmethod
+    def unavailable_reason(cls) -> str:
+        """Empty while this backend could run here; otherwise the one thing that stops it. Asked before a
+        backend is picked, so an impossible one never becomes the source of a stream that then fails."""
+        return ""
 
     def ffmpeg_input_args(self) -> list[str]:
         return []
@@ -196,6 +203,11 @@ class _PipeCapture(ScreenCapture):
         # in them is unevenly spaced in time, and that is what an eye reads as judder. These record the gap
         # between the publish times of consecutive DISTINCT pictures as they actually went out.
         self._content_gaps_ms: list[float] = []
+        # the gap between every picture the READER publishes, sent or not. The content gaps above
+        # only see the ones a slot took, so they cannot tell an uneven SOURCE from an uneven pick:
+        # if arrivals are even and content gaps are not, the grid is doing it and it is our bug.
+        self._arrival_gaps_ms: list[float] = []
+        self._last_arrival = 0.0
         self._last_published_sent = 0.0
         self._reader: threading.Thread | None = None
         self._drain: threading.Thread | None = None
@@ -233,11 +245,11 @@ class _PipeCapture(ScreenCapture):
         pass
 
     # -- ScreenCapture
-    def start(self, width: int, height: int, fps: int) -> bool:
+    def start(self, width: int, height: int, fps: float) -> bool:
         with self._lifecycle:
             return self._start_locked(width, height, fps)
 
-    def _start_locked(self, width: int, height: int, fps: int) -> bool:
+    def _start_locked(self, width: int, height: int, fps: float) -> bool:
         self.stop()   # a pipeline left over from an earlier run must not double up
         self.width, self.height, self.fps = width, height, fps
         self._frame_bytes = frame_bytes(width, height)
@@ -246,6 +258,8 @@ class _PipeCapture(ScreenCapture):
         self._source_frames = self._sent_frames = 0
         self._new_frames = self._repeat_frames = self._skipped_frames = self._late_slots = 0
         self._content_gaps_ms = []
+        self._arrival_gaps_ms = []
+        self._last_arrival = 0.0
         self._last_published_sent = 0.0
         self._stderr_tail = ""
         self._stop = threading.Event()
@@ -305,7 +319,7 @@ class _PipeCapture(ScreenCapture):
         # encoderExitUs, no PTS, and stream.c shows each access unit as it arrives.
         return ["-probesize", "32", "-analyzeduration", "0",
                 "-f", "rawvideo", "-pix_fmt", "yuv420p", "-video_size", "%dx%d" % (self.width, self.height),
-                "-framerate", str(self.fps), "-i", "pipe:0"]
+                "-framerate", "%d/%d" % protocol.fps_fraction(self.fps), "-i", "pipe:0"]
 
     def feed(self, ffmpeg_stdin) -> None:
         stop = self._stop
@@ -408,7 +422,10 @@ class _PipeCapture(ScreenCapture):
         # start/stop cycles through the real gst pipeline: fds 5 -> 5, threads 2 -> 2, no child left behind,
         # 60.0 writes a second in every one of them.
         seen = 0                    # generation of the last picture WRITTEN
-        interval = 1.0 / self.fps
+        # from the exact fraction, not from the rounded 59.94 the GUI shows: the PS3 puts out 60000/1001 Hz
+        # and this grid is what has to match it. The difference is only 1 ppm, but it is free to be right
+        numerator, denominator = protocol.fps_fraction(self.fps)
+        interval = denominator / numerator
         window = interval * WRITE_WINDOW_FRACTION
         slew = interval * SERVO_SLEW_FRACTION
         # Where in the window the servo parks the source's arrivals: on its EARLY EDGE, i.e. on the
@@ -576,9 +593,23 @@ class _PipeCapture(ScreenCapture):
         window = ideal / 4
         on_time = sum(1 for gap in gaps if abs(gap - ideal) <= window)
         doubled = sum(1 for gap in gaps if gap >= ideal * 1.75)   # a gap this long is a visibly held picture
-        return ("capture: smoothness over %d pictures - median gap %.1f ms (ideal %.1f), "
+        line = ("capture: smoothness over %d pictures - median gap %.1f ms (ideal %.1f), "
                 "90%% under %.1f ms, 99%% under %.1f ms; %.0f%% on the cadence, %d visible hitches"
                 % (len(gaps), median, ideal, p90, p99, 100.0 * on_time / len(gaps), doubled))
+
+        # The same measurement one stage earlier: how evenly pictures ARRIVED, before the grid chose
+        # which of them to send. Reading the two together says where an uneven picture comes from -
+        # uneven arrivals are the source's or GStreamer's doing, even arrivals with uneven content
+        # gaps would be ours.
+        arrivals = sorted(self._arrival_gaps_ms)
+        if len(arrivals) >= 30:
+            a_median = arrivals[len(arrivals) // 2]
+            a_on_time = sum(1 for gap in arrivals if abs(gap - ideal) <= window)
+            line += ("\ncapture: arrivals over %d pictures - median %.1f ms, 90%% under %.1f ms, "
+                     "99%% under %.1f ms; %.0f%% on the cadence"
+                     % (len(arrivals), a_median, arrivals[int(len(arrivals) * 0.90)],
+                        arrivals[int(len(arrivals) * 0.99)], 100.0 * a_on_time / len(arrivals)))
+        return line
 
     def stop(self) -> None:
         with self._lifecycle:
@@ -660,6 +691,9 @@ class _PipeCapture(ScreenCapture):
                         break                      # see above: not our list any more, so not our picture
                     self._latest = index
                     self._published_at = published   # feed() ages this picture, and phases its grid, from here
+                    if self._last_arrival:
+                        self._arrival_gaps_ms.append((published - self._last_arrival) * 1000.0)
+                    self._last_arrival = published
                     self._source_frames += 1
                     self._generation += 1
                     self._fresh.notify_all()   # feed() sends this picture at once - see the pacing note there
@@ -747,6 +781,10 @@ class PortalCapture(_PipeCapture):
 
     name = "portal"
 
+    @classmethod
+    def unavailable_reason(cls) -> str:
+        return "" if portal.is_available() else _("no ScreenCast portal on this desktop")
+
     def __init__(self):
         super().__init__()
         self._session: portal.ScreenCastSession | None = None
@@ -810,7 +848,8 @@ class TestCapture(_PipeCapture):
 
     def _open_source(self) -> list[str]:
         return ["videotestsrc", "is-live=true", "pattern=ball",
-                "!", "video/x-raw,framerate=%d/1,width=%d,height=%d" % (self.fps, self.width, self.height)]
+                "!", "video/x-raw,framerate=%d/%d,width=%d,height=%d"
+                % (protocol.fps_fraction(self.fps) + (self.width, self.height))]
 
 
 class X11Capture(ScreenCapture):
@@ -819,12 +858,22 @@ class X11Capture(ScreenCapture):
     name = "x11grab"
     needs_scale = True   # x11grab delivers the whole desktop at its own size; ffmpeg scales (see encoders)
 
+    @classmethod
+    def unavailable_reason(cls) -> str:
+        if not os.environ.get("DISPLAY"):
+            return _("x11grab needs DISPLAY")
+        # only reached by an explicit TEE_CST_CAPTURE=x11; the automatic choice below never gets this far
+        # on Wayland, because the portal wins there
+        if _wayland_session():
+            return _("under Wayland x11grab sees Xwayland, not the desktop")
+        return ""
+
     def __init__(self):
         super().__init__()
         self.fps = 0
         self._display = ""
 
-    def start(self, width: int, height: int, fps: int) -> bool:
+    def start(self, width: int, height: int, fps: float) -> bool:
         self._display = os.environ.get("DISPLAY", "")
         if not self._display:
             log.write(_("capture: x11grab needs DISPLAY"))
@@ -835,13 +884,130 @@ class X11Capture(ScreenCapture):
         return True
 
     def ffmpeg_input_args(self) -> list[str]:
-        return ["-f", "x11grab", "-framerate", str(self.fps), "-draw_mouse", "1", "-i", self._display]
+        return ["-f", "x11grab", "-framerate", "%d/%d" % protocol.fps_fraction(self.fps),
+                "-draw_mouse", "1", "-i", self._display]
 
     def feed(self, ffmpeg_stdin) -> None:
         return   # ffmpeg reads the screen directly
 
     def stop(self) -> None:
         self.captured_fps = 0
+
+
+# --------------------------------------------------------------- capture paths that are wired but not on
+#
+# Both exist for the one problem the portal keeps handing us: GNOME's ScreenCast delivers roughly every
+# other repaint, so what the PS3 sees are the compositor's leftovers rather than the screen. Another
+# recorder does not help - OBS asks the very same portal. What would help is a capture that does not go
+# through the compositor at all, and these are the two ways to do that on this PC.
+#
+# Neither is switched on: each says exactly what stops it here, create_capture() never picks one by itself,
+# and TEE_CST_CAPTURE=kms / =nvfbc asks for one and falls back to the usual source when it cannot run.
+
+def _wayland_session() -> bool:
+    # the same test display_mode makes; kept local so capture does not pull that module in for one check
+    return bool(os.environ.get("WAYLAND_DISPLAY")) or os.environ.get("XDG_SESSION_TYPE", "").strip().lower() == "wayland"
+
+
+def _drm_card() -> str:
+    """The first DRM card we may open, or "" - the number is not fixed (this PC has card1, not card0)."""
+    try:
+        names = sorted(name for name in os.listdir("/dev/dri") if name.startswith("card"))
+    except OSError:
+        return ""
+    for name in names:
+        path = "/dev/dri/" + name
+        if os.access(path, os.R_OK | os.W_OK):
+            return path
+    return ""
+
+
+class KmsCapture(ScreenCapture):
+    """ffmpeg's kmsgrab: the scanout buffer straight out of DRM, past the compositor and its frame skipping.
+
+    NOT READY. Two pieces are missing. Reading a framebuffer through DRM needs to be the DRM master or to
+    hold CAP_SYS_ADMIN, and under Wayland the compositor is the master - so this needs either a setcap'd
+    helper or a session that hands the card over. And the frames arrive as DRM_PRIME handles: the encoder
+    chain in encoders.py would have to grow a hwmap/hwdownload stage in front of it (see ffmpeg_input_args)."""
+
+    name = "kmsgrab"
+    needs_scale = True   # the scanout plane is the whole screen at its own size
+
+    def __init__(self):
+        super().__init__()
+        self.fps = 0
+        self._device = ""
+
+    @classmethod
+    def unavailable_reason(cls) -> str:
+        if not _drm_card():
+            return _("no DRM device this user may open")
+        if _wayland_session():
+            return _("the compositor holds DRM master; kmsgrab needs CAP_SYS_ADMIN")
+        return _("the encoder chain cannot take DRM_PRIME frames yet")
+
+    def start(self, width: int, height: int, fps: float) -> bool:
+        self._device = _drm_card()
+        self.fps = fps
+        log.write(_("capture: %s is not finished yet (%s)") % (self.name, self.unavailable_reason()))
+        return False
+
+    def ffmpeg_input_args(self) -> list[str]:
+        # kept next to the reason above: this is the input the finished path would use, and everything
+        # after it would still need "-vf hwmap=derive_device=vaapi,hwdownload,format=nv12"
+        return ["-f", "kmsgrab", "-framerate", "%d/%d" % protocol.fps_fraction(self.fps),
+                "-device", self._device or "/dev/dri/card0", "-i", "-"]
+
+    def feed(self, ffmpeg_stdin) -> None:
+        return   # ffmpeg would read DRM itself
+
+    def stop(self) -> None:
+        self.captured_fps = 0
+
+
+class NvfbcCapture(ScreenCapture):
+    """NVIDIA frame-buffer capture (libnvidia-fbc): the driver hands over the finished frame, no compositor.
+
+    NOT READY. It is X11-only, and the desktop driver refuses NvFBC to anything but the professional cards
+    unless the driver is patched. ffmpeg has no nvfbc input either, so the finished path would be a small
+    helper that opens the library and writes frames into the pipe - the shape _PipeCapture already feeds."""
+
+    name = "nvfbc"
+
+    LIBRARY = "libnvidia-fbc.so.1"
+
+    def __init__(self):
+        super().__init__()
+        self.fps = 0
+
+    @classmethod
+    def unavailable_reason(cls) -> str:
+        if not ctypes.util.find_library("nvidia-fbc"):
+            return _("%s is not installed") % cls.LIBRARY
+        if _wayland_session():
+            return _("NvFBC only captures an X11 screen")
+        return _("the desktop driver refuses NvFBC without the known driver patch")
+
+    def start(self, width: int, height: int, fps: float) -> bool:
+        self.fps = fps
+        log.write(_("capture: %s is not finished yet (%s)") % (self.name, self.unavailable_reason()))
+        return False
+
+    def feed(self, ffmpeg_stdin) -> None:
+        return
+
+    def stop(self) -> None:
+        self.captured_fps = 0
+
+
+# every backend by the name TEE_CST_CAPTURE takes
+BACKENDS: dict[str, type] = {
+    "portal": PortalCapture,
+    "x11": X11Capture,
+    "test": TestCapture,
+    "kms": KmsCapture,
+    "nvfbc": NvfbcCapture,
+}
 
 
 # one share dialog at a time: warm_up() at server start and a PLAY arriving meanwhile must not race
@@ -857,7 +1023,18 @@ def _remember_token(saved: str | None, token: str | None) -> None:
 
 
 def create_capture() -> ScreenCapture | None:
-    """The backend for this desktop: test source (opt-in) > portal > x11grab; None when there is nothing."""
+    """The backend for this desktop: TEE_CST_CAPTURE if it names a usable one, else test source (opt-in) >
+    portal > x11grab; None when there is nothing."""
+    wanted = os.environ.get("TEE_CST_CAPTURE", "").strip().lower()
+    if wanted:
+        chosen = BACKENDS.get(wanted)
+        if chosen is None:
+            log.write(_("capture: TEE_CST_CAPTURE=%s is not a source (%s)") % (wanted, ", ".join(sorted(BACKENDS))))
+        else:
+            reason = chosen.unavailable_reason()
+            if not reason:
+                return chosen()
+            log.write(_("capture: %s cannot run here (%s) - using the usual source") % (wanted, reason))
     if os.environ.get("TEE_CST_TEST_SOURCE") == "1":
         return TestCapture()
     if portal.is_available():

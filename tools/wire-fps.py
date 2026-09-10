@@ -10,8 +10,8 @@ what really goes out, and its gap histogram separates the two causes that look i
 
 Needs root for the capture (tcpdump). Usage:
 
-    sudo tools/wire-fps.py 10.42.0.237            # 10 s
-    sudo tools/wire-fps.py 10.42.0.237 -d 60      # a minute, with per-second rates
+    sudo tools/wire-fps.py 192.0.2.237            # 10 s
+    sudo tools/wire-fps.py 192.0.2.237 -d 60      # a minute, with per-second rates
 """
 
 import argparse
@@ -133,7 +133,7 @@ def report(times: list[float], per_second: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("host", help="Adresse der PS3, z. B. 10.42.0.237")
+    parser.add_argument("host", help="Adresse der PS3, z. B. 192.0.2.237")
     parser.add_argument("-d", "--duration", type=int, default=10, help="Messdauer in Sekunden (Vorgabe 10)")
     parser.add_argument("-i", "--interface", help="Netzwerkkarte (Vorgabe: die von tcpdump gewählte)")
     arguments = parser.parse_args()

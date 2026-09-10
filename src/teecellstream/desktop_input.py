@@ -29,8 +29,8 @@ try:
 except ImportError:
     evdev = None
 
-from . import log
-from .protocol import PadBits
+from . import hid_keys, log
+from .protocol import HID_BTN_LEFT, HID_BTN_MIDDLE, HID_BTN_RIGHT, PadBits
 from .virtual_gamepad import EV_KEY, node_path, open_uinput
 from .i18n import _
 
@@ -405,6 +405,11 @@ class DesktopInput:
         self._variant = variant
         self._table: KeyTable | None = None
         self._last_buttons = 0
+        self._hid_down: set[int] = set()         # evdev codes the console's own keyboard is holding
+        self._hid_buttons = 0                    # ...and the buttons its own mouse is holding
+        self._hid_table: dict[int, int] | None = None
+        self._hid_modifiers: dict[int, int] | None = None
+        self._hid_unknown: set[int] = set()       # usages already complained about, so the log stays short
         self._pointer_carry_x = self._pointer_carry_y = self._scroll_carry = 0.0   # sub-pixel remainders, so slow moves still move
         self._unknown_logged: set[str] = set()
 
@@ -488,14 +493,82 @@ class DesktopInput:
                 self._emit(self._keyboard, EV_KEY, code, 0)
         self._last_buttons = buttons
 
+    # ---------------------------------------------------------------- a real USB keyboard and mouse
+    HID_BUTTONS = ((HID_BTN_LEFT, BTN_LEFT), (HID_BTN_RIGHT, BTN_RIGHT), (HID_BTN_MIDDLE, BTN_MIDDLE))
+
+    def apply_hid(self, modifiers: int, keys, buttons: int, dx: int, dy: int, wheel: int) -> None:
+        """One report from the USB keyboard and mouse plugged into the console.
+
+        A report is STATE, not events: it says which keys are down at this instant. What gets emitted is
+        the difference against the previous one, which is also what makes a lost packet harmless - the
+        next report restates the truth. Anything missing from it is released, so no key can stick down.
+
+        The codes are HID positions, and they go to a uinput keyboard, which speaks positions too: the
+        PC's own layout decides which characters come out. Nothing here knows which characters those are,
+        and that is the point - see hid_keys.py.
+        """
+        with self._gate:
+            if not self._ensure_open():
+                return
+            if self._hid_table is None:
+                self._hid_table = hid_keys.resolve(hid_keys.HID_TO_KEY_NAME.items())
+                self._hid_modifiers = hid_keys.resolve(hid_keys.MODIFIER_BITS)
+
+            wanted = {code for bit, code in self._hid_modifiers.items() if modifiers & bit}
+            for usage in keys:
+                if usage in (0, 1):
+                    continue          # 0 = no key here, 1 = the keyboard's own "too many keys at once"
+                code = self._hid_table.get(usage)
+                if code is None:
+                    if usage not in self._hid_unknown:
+                        self._hid_unknown.add(usage)
+                        log.write(_("pad: unknown key from the console's keyboard (HID 0x%02X)") % usage)
+                    continue
+                wanted.add(code)
+
+            for code in self._hid_down - wanted:
+                self._emit(self._keyboard, EV_KEY, code, 0)
+            for code in wanted - self._hid_down:
+                self._emit(self._keyboard, EV_KEY, code, 1)
+            self._hid_down = wanted
+
+            if dx or dy:
+                # both axes in ONE event frame, or a diagonal arrives as two separate moves
+                self._emit(self._mouse, EV_REL, REL_X, int(dx), more=((EV_REL, REL_Y, int(dy)),))
+            if wheel:
+                self._emit(self._mouse, EV_REL, REL_WHEEL, int(wheel),
+                           more=((EV_REL, REL_WHEEL_HI_RES, int(wheel) * 120),))
+
+            pressed = buttons & ~self._hid_buttons
+            released = self._hid_buttons & ~buttons
+            for bit, code in self.HID_BUTTONS:
+                if pressed & bit:
+                    self._emit(self._mouse, EV_KEY, code, 1)
+                if released & bit:
+                    self._emit(self._mouse, EV_KEY, code, 0)
+            self._hid_buttons = buttons
+
+    def _release_hid(self) -> None:
+        """Whatever the console's own keyboard and mouse are still holding - see release_all()."""
+        for code in self._hid_down:
+            self._emit(self._keyboard, EV_KEY, code, 0)
+        self._hid_down = set()
+        for bit, code in self.HID_BUTTONS:
+            if self._hid_buttons & bit:
+                self._emit(self._mouse, EV_KEY, code, 0)
+        self._hid_buttons = 0
+
     # releases anything still held, so nothing is left stuck down when the stream ends
     def release_all(self) -> None:
         with self._gate:
             if self._mouse is None:
                 # nothing can be held on devices that were never created - and do not create them for this
                 self._last_buttons = 0
+                self._hid_down = set()
+                self._hid_buttons = 0
                 self._pointer_carry_x = self._pointer_carry_y = self._scroll_carry = 0.0
                 return
+            self._release_hid()     # a key still held on the console's own keyboard when the stream ends
             self._apply_locked(0, 0, 0, 0, 0)
 
     # types one character from the PS3's on-screen keyboard. control keys map to real keys; every

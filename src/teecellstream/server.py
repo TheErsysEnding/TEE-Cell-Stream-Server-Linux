@@ -2,7 +2,7 @@
 
 Port of Server.cs. One UDP socket on :38310:
  - broadcasts a discovery beacon to :38311 every second so the PS3 finds us
- - answers TIME (clock sync), PLAY/STOP, PADMODE, KEY, CUSTOM, and the 60/s CP pad packets
+ - answers TIME (clock sync), PLAY/STOP, PADMODE, KEY, HID, CUSTOM, and the 60/s CP pad packets
 
 The window (app.py/ui.py) is only a view onto this object: closing the window leaves all of this running.
 """
@@ -55,6 +55,12 @@ class Server:
 
         self._stream_confirmed = False               # a pad packet has arrived, so the PS3 really is streaming
         self._last_client_packet = time.monotonic()
+        self._session_started = 0.0                  # when the current stream came up (see stop_streaming)
+        self._faulty_sessions = 0                    # streams in a row that never held - see stop_streaming
+        self._last_fault = 0.0                       # when a short stream last counted, to tell a burst from bad luck
+        self._restore_due: float | None = None       # a kept display mode owes a restore at this time
+        self._hid_trace = os.environ.get("TEE_CST_HID_TRACE") == "1"   # see _trace_hid
+        self._hid_trace_last = 0.0
         self._running = False
         self._threads: list[threading.Thread] = []
         self.extension_state = shell_extension.UNAVAILABLE   # set by the shell-extension thread at start-up
@@ -73,11 +79,12 @@ class Server:
 
         self.ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
         self.live_streamer = LiveStreamer(
-            self.sock, self.ffmpeg_path, protocol.FPS, protocol.KBPS, protocol.WIDTH, protocol.HEIGHT,
+            self.sock, self.ffmpeg_path, self.stream_fps, protocol.KBPS, protocol.WIDTH, protocol.HEIGHT,
             protocol.SEND_RATE_KBPS, capture.create_capture, lambda: self.encoders_to_try,
             lambda: self.loss_recovery, self._on_all_encoders_failed,
             lambda: self.video_kbps, lambda: self.entropy_coder, lambda: self.stream_size,
-            lambda: self.rate_control, lambda: self.slice_count)
+            lambda: self.rate_control, lambda: self.slice_count,
+            stream_fps=lambda: self.stream_fps)   # read per stream, like the bitrate
         # the same resolved binary the video uses (and the one the "ready:" line names): audio must not
         # fall back to a bare "ffmpeg" off PATH while video runs an absolute path
         self.audio_streamer = AudioStreamer(self.sock, self.ffmpeg_path)   # desktop sound goes with the desktop picture
@@ -117,7 +124,7 @@ class Server:
         if not self._running:
             return
         self._running = False
-        self.stop_streaming("the server is shutting down")
+        self.stop_streaming("the server is shutting down", user_stop=True)   # give the desktop back at once
         if self.pad_receiver is not None:
             self.pad_receiver.close()
         kill_all()
@@ -170,7 +177,7 @@ class Server:
     @property
     def settings_summary(self) -> str:
         recovery = "Intra-Refresh" if self.loss_recovery == "intra" else "Keyframes"
-        return "%dx%d at %d fps, %d Mbit/s, %s, %s" % (self.stream_size + (protocol.FPS,
+        return "%dx%d at %d fps, %d Mbit/s, %s, %s" % (self.stream_size + (self.stream_fps,
                                                         self.video_kbps // 1000, self.entropy_coder.upper(), recovery))
 
     # the fuse. armed, the server answers the PS3; tripped, it ignores it and leaves the desktop alone.
@@ -181,6 +188,7 @@ class Server:
             return
         self.is_armed = True
         self.trip_reason = None
+        self._faulty_sessions = 0
         if self.live_streamer is not None:
             self.live_streamer.reset_failures()
         log.write(_("started: waiting for the PS3"))
@@ -190,11 +198,11 @@ class Server:
             return
         self.is_armed = False
         self.trip_reason = why
-        self.stop_streaming(why)
+        self.stop_streaming(why, user_stop=True)
         log.write("stopped: " + why)
 
     def trip_fuse(self, fault: str) -> None:
-        self.disarm(fault + ". Press Start once it is fixed.")
+        self.disarm(fault + _(". Press Start once it is fixed."))   # the table has had this string all along
 
     def _on_all_encoders_failed(self, reason: str) -> None:
         self.trip_fuse(reason)
@@ -234,6 +242,23 @@ class Server:
         log.write("video: error correction from the next stream on: " + ("Intra-Refresh" if value == "intra" else "Keyframes"))
 
     @property
+    def stream_fps(self) -> int:
+        """Pictures per second sent to the PS3. Lower rates buy the console time per picture - 33.3 ms
+        at 30 fps against 16.7 at 60 - at the cost of how evenly they land on the display's refreshes.
+        See protocol.FPS_CHOICES for what each rate does."""
+        value = settings.get("stream_fps", protocol.FPS)
+        return value if value in protocol.FPS_CHOICES else protocol.FPS
+
+    @stream_fps.setter
+    def stream_fps(self, value: int) -> None:
+        if value not in protocol.FPS_CHOICES or value == self.stream_fps:
+            return
+        # NOT int(): 59.94 would become 59, which is not a listed choice, so the getter fell straight
+        # back to 60 and the setting looked like it refused to stick. The choices are validated above.
+        settings.set("stream_fps", value)
+        log.write(_("video: frame rate from the next stream on: %g fps") % value)
+
+    @property
     def video_kbps(self) -> int:
         """Video bitrate. The PS3's decoder - not the link - is what this limits: measured 38-40 ms decode per
         frame at 11-13 Mbit/s, which is past the 16.7 ms a 60 fps frame gets, so the console dropped every
@@ -254,11 +279,13 @@ class Server:
         value = settings.get("stream_size", "")
         # the misaligned sizes 1.7.0 offered map to their aligned neighbours rather than silently
         # dropping back to 720p on someone who had picked a large one
-        value = {"1600x900": "1536x864", "1920x1080": "1920x1088"}.get(value, value)
+        # 1920x1088 now maps the OTHER way: the app crops the encoder's padding itself, so the
+        # honest 1080 is what gets sent. Anyone who had picked 1088 keeps the same picture.
+        value = {"1600x900": "1536x864", "1920x1088": "1920x1080"}.get(value, value)
         for size in protocol.STREAM_SIZES:
             if value == "%dx%d" % size:
                 return size
-        return protocol.STREAM_SIZES[0]
+        return protocol.DEFAULT_SIZE
 
     @stream_size.setter
     def stream_size(self, value) -> None:
@@ -337,17 +364,25 @@ class Server:
 
     @switch_display_mode.setter
     def switch_display_mode(self, on: bool) -> None:
-        self.display_strategy = "capture" if on else "off"
+        self.display_strategy = "sixty" if on else "off"
 
     @property
     def display_strategy(self) -> str:
-        """"off", "capture" (the measured default: most refresh the compositor can use) or "sixty" (desktop
-        at 60 Hz, so game, compositor, grid and console all share one clock). See display_mode."""
+        """What to do with the desktop while streaming - see display_mode.DISPLAY_STRATEGIES.
+
+        The default is "sixty": the desktop goes to the STREAM'S OWN SIZE at a whole multiple of its
+        frame rate. Both halves were measured. The size is what made the picture sharp - at any other
+        size the stream is resampled on the way out, and 1080p through a 1440p desktop looked like
+        "Pixelbrei" until this stopped happening. The multiple is what made it even: the desktop, the
+        capture grid and the console then share one clock instead of beating against each other.
+        "capture" (the old default) takes the highest refresh the screen can do and lets the size fall
+        where it may, which costs that sharpness.
+        """
         stored = settings.get("display_strategy")
         if stored in display_mode.DISPLAY_STRATEGIES:
             return stored
-        # migrate the old boolean: it only ever meant off or the capture-optimised mode
-        return "capture" if bool(settings.get("switch_display_mode", True)) else "off"
+        # the old boolean only ever meant "switch or do not switch"; switching now means "sixty"
+        return "sixty" if bool(settings.get("switch_display_mode", True)) else "off"
 
     @display_strategy.setter
     def display_strategy(self, value: str) -> None:
@@ -387,7 +422,17 @@ class Server:
 
             # the pad arrives 60 times a second, so match it before anything else and never log it
             if len(packet) >= protocol.PAD_PACKET_BYTES and packet[0] == 0x43 and packet[1] == 0x50:   # 'C' 'P'
-                self._stream_confirmed = True
+                if not self._stream_confirmed:
+                    self._stream_confirmed = True
+                    # The console is really receiving, so the mode switch did its job - and the countdown
+                    # that would otherwise undo it has to stop. It exists for a monitor that accepts a
+                    # mode and shows nothing, leaving somebody staring at a black desktop; but whoever is
+                    # streaming is looking at their TELEVISION and cannot answer a dialog on the PC. So it
+                    # always ran out, and reverting the desktop mid-stream left the console on a frozen
+                    # picture while the pad still worked. Measured twice in one evening, exactly 15.0 s
+                    # after each switch. The black-monitor case is not lost: ending the stream restores
+                    # the mode anyway, which is the same thing the countdown would have done.
+                    self.display_mode.confirm_visible()
                 self.pad_receiver.handle(packet, sender)
                 continue
 
@@ -405,18 +450,30 @@ class Server:
             if not self.is_armed:
                 return   # stopped, or the encoder is broken: do not touch the desktop
             with self.stream_lock:   # don't let a watchdog stop interleave with bringing a stream up
+                if not self.is_ps3_connected:
+                    self._session_started = time.monotonic()   # a fresh session: the give-up clock starts here
+                self._restore_due = None   # back within the window: keep the mode instead of switching again
                 self.connected_ps3 = sender[0]
                 # the desktop must be at the streaming size BEFORE the capture starts
                 keep_display_awake(True)
                 strategy = self.display_strategy
                 if strategy != "off" and not os.environ.get("TEE_CST_NO_DISPLAY_SWITCH"):
-                    self.display_mode.match_for_capture(*self.stream_size, protocol.FPS, strategy)
+                    self.display_mode.match_for_capture(*self.stream_size, self.stream_fps, strategy)
                 self.live_streamer.start(sender)     # repeat PLAYs are ignored inside
                 self.audio_streamer.start(sender)
         elif text.startswith("PADMODE "):
             self.pad_receiver.set_gamepad_mode(text[8:].startswith("gamepad"))
         elif text.startswith("KEY ") and len(packet) >= 5:
             self.pad_receiver.type_key(chr(packet[4]))   # the raw byte after "KEY " is the character
+        elif text.startswith("HID "):
+            # a real USB keyboard and mouse plugged into the console. Binary after the four-byte tag,
+            # like the CP pad packet - see protocol.parse_hid_packet
+            report = protocol.parse_hid_packet(packet)
+            if report is not None:
+                self._last_client_packet = time.monotonic()   # proof the PS3 is there, same as a pad packet
+                if self._hid_trace:
+                    self._trace_hid(report)
+                self.pad_receiver.apply_hid(*report)
         elif text.startswith("CUSTOM "):
             try:
                 slot = int(text[7:].strip())
@@ -428,8 +485,36 @@ class Server:
         else:
             log.write(_("unknown packet from %s: %r") % (sender[0], text[:40]))
 
-    def stop_streaming(self, why: str) -> None:
-        """Everything a stream turns on gets turned off here, whoever asked - a STOP, or the PS3 vanishing."""
+    def _trace_hid(self, report) -> None:
+        """TEE_CST_HID_TRACE=1: one line per report from the console's own keyboard and mouse.
+
+        Deliberately off by default and deliberately kept: the console cannot tell us what its keyboard
+        API hands it - dbg.txt on the console stopped being written - so this is the only place the raw
+        sequence can be read. What it answers is the question guessing kept getting wrong: does a held key
+        arrive as a steady stream of identical reports, and how far apart are they.
+        """
+        modifiers, keys, buttons, dx, dy, wheel = report
+        now = time.monotonic()
+        gap = (now - self._hid_trace_last) * 1000 if self._hid_trace_last else 0.0
+        self._hid_trace_last = now
+        log.write("hid: +%6.1f ms  mod=%02X keys=[%s] btn=%X d=(%d,%d) wheel=%d"
+                  % (gap, modifiers, " ".join("%02X" % k for k in keys), buttons, dx, dy, wheel))
+
+    def stop_streaming(self, why: str, user_stop: bool = False) -> None:
+        """Everything a stream turns on gets turned off here, whoever asked - a STOP, or the PS3 vanishing.
+
+        What counts towards the give-up limit is whether the stream HELD, not who ended it. That is the
+        correction the log forced: this used to count only streams that died by themselves, on the
+        assumption that a STOP packet meant the person at the console had quit. It does not. When the
+        console cannot cope with the bitrate its app gives up and sends STOP itself, then reconnects a
+        second later - measured, 32 times in a row at a two-second beat. Every one of them arrived here
+        as "the PS3 asked us to stop", was waved through as intentional, and RESET the counter that was
+        supposed to catch exactly this. The desktop mode went back and forth each time, which is what
+        kept blacking the screen out.
+
+        user_stop is the one case we really do know is a person: the Stop button in our own window.
+        Nothing that arrives over the network can claim it."""
+        give_up = ""
         with self.stream_lock:
             was_streaming = self.is_ps3_connected
             if self.live_streamer is not None:
@@ -440,20 +525,61 @@ class Server:
             self._stream_confirmed = False
             if self.pad_receiver is not None:
                 self.pad_receiver.release()
-            self.display_mode.restore()
+            now = time.monotonic()
+            # a stream that never got going. The Stop button in our own window is exempt: that one really
+            # is a person, and a person may stop after two seconds as often as they like
+            never_held = was_streaming and not user_stop and (now - self._session_started) < protocol.SHORT_SESSION_SECONDS
+            if was_streaming:
+                if not never_held:
+                    self._faulty_sessions = 0        # it held, or we were told to stop: nothing is wrong
+                else:
+                    # only a BURST counts. Two short sessions half an hour apart are somebody using the app
+                    if now - self._last_fault > protocol.STORM_WINDOW_SECONDS:
+                        self._faulty_sessions = 1
+                    else:
+                        self._faulty_sessions += 1
+                    self._last_fault = now
+                    if self._faulty_sessions >= protocol.FAULTY_SESSIONS_BEFORE_GIVING_UP:
+                        give_up = _("the stream broke off %d times in a row without ever holding - the PS3 "
+                                    "cannot keep up with these settings (try a lower bitrate or size)") % self._faulty_sessions
+            if never_held and not give_up:
+                # the console's app comes back within a second or two. Switching the desktop back now and
+                # forward again on that retry is what blacked the screen out over and over - so the mode
+                # stays put long enough for the retry to walk straight back into it.
+                self._restore_due = now + protocol.RECONNECT_KEEP_MODE_SECONDS
+            elif was_streaming or user_stop:
+                self._restore_due = None
+                self.display_mode.restore()
+            # else nothing was running: this is a repeat of a stop already handled, and it must NOT touch
+            # a hold the first one just set. The console sends its STOP three times over (measured: three
+            # in the same millisecond), and the second one used to cancel the hold and switch the desktop
+            # back at once - which put the black screen back into every single retry.
             keep_display_awake(False)   # idle again: let the screen sleep
             if was_streaming:
                 log.write(_("stream ended: ") + why + _(". Waiting for the PS3 again."))
+        if give_up:
+            self.trip_fuse(give_up)     # outside the lock: this stops the server, which stops streaming again
 
     def _run_client_watchdog(self) -> None:
         """The PS3 sends its pad 60x a second for as long as it is streaming, so silence means it is gone."""
         while self._running:
             time.sleep(protocol.WATCHDOG_TICK_MS / 1000)
             if not self.is_ps3_connected:
+                if self._restore_due is not None:
+                    # a mode held open for a reconnect that never came: put the desktop back now
+                    if time.monotonic() >= self._restore_due:
+                        self._restore_due = None
+                        with self.stream_lock:
+                            self.display_mode.restore()
+                    continue
                 # the pump can stop on its own (every encoder failed, or ffmpeg died) with nothing to put the
-                # desktop back. if it left the resolution switched, restore it here.
+                # desktop back. if it left the resolution switched, restore it here - explicitly, because
+                # stop_streaming deliberately leaves the display alone when there was no session to end
                 if self.display_mode.is_changed:
-                    self.stop_streaming("the encoder stopped on its own")
+                    with self.stream_lock:
+                        self.stop_streaming("the encoder stopped on its own")
+                        self._restore_due = None
+                        self.display_mode.restore()
                 continue
             timeout_ms = protocol.CLIENT_TIMEOUT_MS if self._stream_confirmed else protocol.STREAM_STARTUP_GRACE_MS
             if (time.monotonic() - self._last_client_packet) * 1000 < timeout_ms:

@@ -1,4 +1,4 @@
-# TEE Cell Stream Server Linux
+# TEE PS3 Remoteplay — PC games on PS3, streaming
 
 Stream your Linux desktop to a PlayStation 3 and play PC games with the PS3 controller — Remote Play the
 other way round. Linux port of the Windows tool `cell-stream-server` from
@@ -30,9 +30,35 @@ Two caveats on those numbers. **The PC and the PS3 were joined by a single Ether
 or router between them, so the network term is a best case and every extra hop adds to it. And decode time
 is a figure *under motion*: a still picture costs a fraction of it, because H.264 codes differences.
 
+### It is not perfectly smooth yet — at any resolution
+
+Read the table as "60 pictures arrive every second, and none of them is lost". That is true, and it is
+measured. It is **not** the same as "every picture is on screen for exactly one refresh", and that second
+thing is not finished. Expect an occasional hitch — most people describe it as smooth with the odd stutter,
+not as a locked 60.
+
+Where it comes from, as far as it has been measured:
+
+- **What leaves the PC is close to perfect.** An 87-second Full HD session recorded on the console holds
+  5257 frames: median gap 16.64 ms against an ideal 16.68, standard deviation 1.39 ms, and not one gap
+  over 33 ms — so no frame slot was ever missed.
+- **The console has no frame pacing.** Its app shows a picture the moment it has been decoded; there is no
+  queue and no clock. Its video output runs at 59.94 Hz. So any difference between the rate pictures
+  arrive at and 59.94 has to surface sooner or later as a picture held for two refreshes.
+- **That difference is small but real.** Sending at 59.94 fps and putting the desktop on an exact multiple
+  of it (the default, see below) is what makes it small. It does not make it zero.
+
+Two consequences worth knowing before you file it as a fault: **59.94 fps is the rate to pick**, not 60 —
+it is the console's own, and every other rate beats against it. And a monitor that cannot do a whole
+multiple of 59.94 at the stream's size will be scaled from a larger one, which costs sharpness rather than
+smoothness.
+
+The remaining work is on the console side: pacing presentation to its own vblank instead of showing each
+picture as soon as it is decoded. That is the next thing, and it is not in this release.
+
 ## What you need
 
-- **A PS3 with HEN or CFW**, running `TEE-Remote-Play-v1.0.pkg` from [Releases](../../releases).
+- **A PS3 with HEN or CFW**, running `TEE-Remote-Play-v1.0.0.pkg` from [Releases](../../releases).
   Without a PS3-side app there is nothing to stream to — this package is only the PC half.
   mohasi's original [`cell-stream.pkg`](https://github.com/mohasi/ps3-dev/releases/tag/174-a5dd795)
   works too, without the recording and the controls list.
@@ -43,7 +69,7 @@ is a figure *under motion*: a still picture costs a fraction of it, because H.26
 ## Install
 
 ```
-sudo apt install ./tee-cell-stream-server_1.23.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.0.0_all.deb
 ```
 
 Get the `.deb` from [Releases](../../releases). Then **log out and back in once** — GNOME only reads newly
@@ -224,7 +250,7 @@ bash tests/run_integration.sh                      # a fake PS3 against the real
 bash packaging/build-deb.sh                        # → dist/*.deb
 ```
 
-407 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
+491 unit tests plus an integration test that impersonates a PS3 client and checks the stream against what
 the console expects: fragment layout, clock sync, frame pacing, audio packet rate and the controller
 channel. `SPEC.md` documents every module's contract and, where behaviour deviates from the Windows
 original, the measurement that justified it.

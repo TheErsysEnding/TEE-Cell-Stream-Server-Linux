@@ -1,3 +1,339 @@
+tee-cell-stream-server (1:1.0.0) unstable; urgency=medium
+
+  * Erste oeffentliche Fassung: V1.0.0. Server fuer Linux und die PKG fuer
+    die PS3 werden ab hier zusammen unter einer Versionsnummer geliefert.
+  * Die Versionsnummer traegt eine Epoche ("1:"). Die Entwicklung lief bis
+    1.38.0, bevor die erste Veroeffentlichung als 1.0.0 geschnitten wurde,
+    und dpkg vergleicht streng: ohne Epoche haelt apt 1.0.0 fuer aelter als
+    das Installierte und verweigert die Aktualisierung. Genau dafuer ist die
+    Epoche da. Sie bleibt ab jetzt an jeder Version.
+  * Der Desktop wird standardmaessig auf die GROESSE DES STREAMS gestellt,
+    bei einem ganzen Vielfachen der Bildrate ("Gleiche Groesse &
+    Bildwiederholrate"). Vorher war "Fuer die Aufnahme optimieren" die
+    Vorgabe, das nimmt die schnellste Bildwiederholrate und laesst die
+    Groesse fallen, wo sie faellt. Beide Haelften sind gemessen: die Groesse
+    ist das, was das Bild scharf macht - bei jeder anderen wird der Stream
+    auf dem Weg zur Konsole umgerechnet, und 1080p durch einen 1440p-Desktop
+    sah genau deshalb weich aus. Das Vielfache ist das, was ihn gleichmaessig
+    macht.
+    Hinweis: bei 720p hat nicht jeder Monitor ein ganzes Vielfaches von
+    59,94 in dieser Groesse. Dann wird von der naechsten gewoehnlichen
+    Groesse herunterskaliert, weil ein 60-Hz-Desktop die Aufnahme auf etwa
+    zwei Drittel der Bilder verhungern laesst - der schlechtere der beiden
+    Kompromisse.
+
+ -- TEE <github@teebug.de>  Fri, 11 Sep 2026 06:00:00 +0200
+
+tee-cell-stream-server (1.38.0) unstable; urgency=medium
+
+  * Behebt das Standbild auf der Konsole bei der ERSTEN Verbindung, bei der
+    die Steuerung aber weiterlief. Ursache war die Rueckfrage "Siehst du
+    dieses Fenster?": ohne Antwort schaltet sie den Desktop nach 15 Sekunden
+    zurueck. Wer streamt, schaut aber auf den FERNSEHER und kann am PC nichts
+    wegklicken - sie lief also immer ab. Der Desktop sprang mitten im Stream
+    auf seine eigene Groesse zurueck, waehrend die Aufnahme auf der Groesse
+    des Streams stand: Bild eingefroren, Pad weiter funktionsfaehig, weil das
+    ein anderer Weg ist. Beim zweiten Versuch klappte es, weil man dann am
+    PC sass und geklickt hat.
+    Im Protokoll steht es zweimal an einem Abend, jeweils exakt 15,000 s nach
+    dem Umschalten.
+  * Der Countdown wird jetzt beendet, sobald die KONSOLE nachweislich Bilder
+    bekommt (erstes Pad-Paket). Das ist die Antwort, auf die die Rueckfrage
+    wartet - nur eben von der richtigen Seite. Der Fall, vor dem sie schuetzt
+    (ein Monitor nimmt den Modus an und zeigt nichts), geht dabei nicht
+    verloren: das Beenden des Streams stellt den Modus ohnehin wieder her,
+    also genau das, was der Countdown getan haette.
+  * Zweiter Rueckschaltweg im selben Zusammenhang: schliesst sich der Dialog
+    selbst, wenn seine eigene Anzeige abgelaufen ist, kam das als "Nein" an,
+    weil close_response auf "no" steht. Damit wurde der Desktop ein zweites
+    Mal zurueckgeschaltet - und still, im Log stand nur der Wechsel ohne
+    Begruendung (17:47 im Protokoll). Ein Dialog, der sich selbst schliesst,
+    beantwortet jetzt nichts mehr.
+
+ -- TEE <github@teebug.de>  Fri, 11 Sep 2026 04:00:00 +0200
+
+tee-cell-stream-server (1.37.0) unstable; urgency=medium
+
+  * TEE_CST_HID_TRACE=1 schreibt jede Meldung der USB-Tastatur und -Maus an
+    der Konsole mit Zeitabstand ins Serverlog. Standardmaessig aus. Es gibt
+    ihn, weil die Konsole selbst nichts erzaehlen kann - dbg.txt wird dort
+    nicht mehr geschrieben - und weil Raten bei der Tastatur-Zeitsteuerung
+    zweimal hintereinander danebenlag. Damit ist die Frage messbar statt
+    schaetzbar: kommt eine gehaltene Taste als stetiger Strom gleicher
+    Meldungen an, und wie weit liegen die auseinander?
+
+ -- TEE <github@teebug.de>  Fri, 11 Sep 2026 03:00:00 +0200
+
+tee-cell-stream-server (1.36.0) unstable; urgency=medium
+
+  * Eine echte USB-Tastatur und -Maus an der KONSOLE steuern jetzt den PC.
+    Das gab es bisher nicht: der Modus, der "Mouse + keyboard" hiess, meinte
+    den Controller, der einen Zeiger schiebt und ueber eine Bildschirm-
+    tastatur tippt - eine wirklich angesteckte Tastatur tat gar nichts. Der
+    alte Modus heisst in der App jetzt "Pad as mouse", was er auch ist, und
+    "USB keyboard + mouse" ist der neue. (App-Seite: PKG v1.1.0 Beta.)
+  * Das Tastaturlayout kommt dabei vom PC, wie gewuenscht - und zwar auf dem
+    einzigen Weg, auf dem das sauber geht: die Konsole liest ihre Tastatur im
+    RAW-Modus und schickt HID-Usages, also TASTENPOSITIONEN, keine Zeichen.
+    Der Server tippt sie in eine virtuelle uinput-Tastatur, die ebenfalls
+    Positionen spricht - damit entscheidet das Layout des PCs, was heraus-
+    kommt. Umlaute, Y/Z und AltGr landen also richtig, ohne dass irgendwo
+    eine zweite Layout-Tabelle gepflegt werden muesste. Wuerde die Konsole
+    uebersetzen, brauchte sie ihr XMB-Layout und der PC muesste die fertigen
+    Zeichen wieder auf Tasten zurueckrechnen - zwei Layouts, eines davon
+    falsch.
+  * Ein Report ist ZUSTAND, keine Ereignisse: er sagt, welche Tasten gerade
+    unten sind. Was darin fehlt, wird losgelassen. Ein verlorenes Paket
+    kostet damit ein Bild Mausbewegung und kann keine Taste haengen lassen -
+    und beim Streamende laesst der Server ohnehin alles los.
+  * Der Serverlog-Text "Maus und Tastatur" fuer den Pad-Modus heisst jetzt
+    "Zeiger und Tastatur", damit die beiden Faelle unterscheidbar bleiben.
+
+ -- TEE <github@teebug.de>  Fri, 11 Sep 2026 01:00:00 +0200
+
+tee-cell-stream-server (1.35.0) unstable; urgency=medium
+
+  * Nachtrag zu 1.34.0, gefunden beim Gegenpruefen am echten Log: die PS3
+    schickt ihr STOP DREIFACH (gemessen: drei in derselben Millisekunde,
+    damit ein verlorenes Paket den Server nicht haengen laesst). Nur beim
+    ersten laeuft noch etwas. Beim zweiten und dritten fiel die neue Logik
+    in den Zweig "nichts zu beenden" und hat damit genau die Modus-Haltezeit
+    wieder AUFGEHOBEN, die das erste gerade gesetzt hatte - der Bildschirm
+    schaltete also weiterhin bei jedem Versuch zurueck. Ein Stopp, bei dem
+    gar keine Sitzung mehr laeuft, laesst die Anzeige jetzt in Ruhe.
+  * Ebenfalls davon betroffen: die drei STOPs zaehlten als drei
+    gescheiterte Sitzungen statt als eine. Jetzt zaehlt nur der Stopp, der
+    wirklich eine laufende Sitzung beendet.
+  * Der Bestaetigungsdialog ("Bild noch da?") wurde bei JEDEM PLAY neu
+    aufgezogen. Da die PS3 bei jeder Neuverbindung ein PLAY schickt, hat das
+    eine bereits gegebene Bestaetigung wieder verworfen und einen zweiten
+    Dialog auf den ersten gesetzt - im Log als zwei "picture confirmed"
+    weniger als eine Sekunde auseinander zu sehen. Gefragt wird jetzt nur
+    noch, wenn wirklich gerade umgeschaltet wurde.
+    (Nicht geaendert: der 15-Sekunden-Rueckfall selbst. Er hat im ganzen Log
+    kein einziges Mal ausgeloest, und ihn von einem laufenden Stream
+    bestaetigen zu lassen waere falsch - der Stream kommt vom Compositor,
+    nicht vom Monitor, und laeuft auch dann, wenn der Bildschirm schwarz
+    bleibt. Genau davor schuetzt der Rueckfall.)
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 23:00:00 +0200
+
+tee-cell-stream-server (1.34.0) unstable; urgency=medium
+
+  * Die Abbruch-Sicherung aus 1.32.0 hat in der Praxis nicht gegriffen, und
+    das Serverlog sagt genau warum. Sie zaehlte nur Streams, die von selbst
+    abreissen - in der Annahme, ein STOP-Paket bedeute, dass am Fernseher
+    jemand die App beendet hat. Das stimmt nicht: kommt die PS3 mit der
+    Bitrate nicht zurecht, gibt IHRE App auf und schickt selbst ein STOP,
+    um eine Sekunde spaeter neu zu verbinden. Gemessen am 10.09. um 16:03:
+    32 Mal hintereinander im Zwei-Sekunden-Takt. Jedes davon kam hier als
+    "die PS3 hat uns gebeten aufzuhoeren" an, galt als gewollt und hat den
+    Zaehler, der genau das fangen sollte, auch noch ZURUECKGESETZT.
+  * Gezaehlt wird jetzt nicht mehr, WER beendet hat, sondern ob die Sitzung
+    GEHALTEN hat. Alles unter 20 Sekunden zaehlt, egal wie es endete. Die
+    einzige Ausnahme ist der Stopp-Knopf im eigenen Fenster - der ist mit
+    Sicherheit ein Mensch, und ueber das Netz kann das niemand behaupten.
+  * Damit ein einzelner kurzer Start nicht mitzaehlt, zaehlen nur BUENDEL:
+    liegen zwischen zwei Abbruechen mehr als 60 Sekunden, faengt die
+    Zaehlung von vorn an. Wer die App abends zweimal kurz startet, loest
+    also nichts aus.
+  * Der eigentliche Gewinn: im Buendel bleibt der Bildschirmmodus stehen.
+    Der Wiederverbindungsversuch faellt in das 6-Sekunden-Fenster und laeuft
+    direkt in den Modus zurueck, den er verlassen hat. Der protokollierte
+    Sturm gegen die neue Logik nachgespielt: Ende nach 3 statt 32 Runden,
+    und EIN Bildschirmwechsel statt 64. Der Ablauf steht als Test drin.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 21:00:00 +0200
+
+tee-cell-stream-server (1.33.0) unstable; urgency=medium
+
+  * Ein Stream, der von selbst abreisst, stoppt jetzt nach dem dritten Mal
+    den Server, statt es endlos weiter zu versuchen. Hintergrund: schafft
+    die PS3 die eingestellte Bitrate nicht, bricht sie ab und ihre App
+    verbindet sofort neu - und weil bei jedem Versuch die Bildschirmgroesse
+    umgeschaltet und danach wieder zurueckgesetzt wurde, wurde der PC-Schirm
+    dabei immer wieder schwarz. Gezaehlt werden nur Streams, die von selbst
+    enden und keine 20 Sekunden gehalten haben; ein absichtliches Stoppen
+    und jeder Stream, der laenger lief, setzen den Zaehler zurueck.
+  * Nach so einem Abriss bleibt der Bildschirmmodus 6 Sekunden lang stehen.
+    Kommt die PS3 in dieser Zeit zurueck, wird gar nicht mehr umgeschaltet -
+    das Hin und Her war der eigentliche Grund fuer die schwarzen Schirme,
+    nicht der Abriss selbst.
+  * Die 60-Hz-Umschaltung nimmt jetzt von mehreren passenden Modi den mit dem
+    KLEINSTEN Rest, nicht den erstbesten. Gemessen: der Entwicklungsmonitor
+    hat 1920x1080 bei 119,8788 Hz UND bei 119,9302 Hz, und nur der erste ist
+    exakt 2 x 59,94. Beide lagen in der 0,5-Hz-Toleranz, also entschied
+    bisher die Reihenfolge der Liste - und die Liste nennt den falschen
+    zuerst. Der Rest IST aber die Schwebung: bei 59,94 fps liegt 119,9302 um
+    0,0502 Hz daneben, die Phase wandert also alle 20 Sekunden durch ein
+    ganzes Neuzeichnen. 119,8788 liegt 0,0012 Hz daneben - dasselbe dauert
+    dort 822 Sekunden, also laenger als jede Sitzung. Die Groesse hat weiter
+    Vorrang: ein Desktop groesser als der Stream kostet eine Umrechnung, und
+    die kostet Schaerfe.
+  * Dazu gehoert die Gegenprobe: "steht der Desktop schon richtig?" wurde mit
+    1,0 Hz Toleranz beantwortet und konnte die beiden 120-Hz-Modi damit gar
+    nicht unterscheiden - ein Desktop auf dem falschen der beiden galt als
+    "schon da" und wurde nie umgeschaltet, was die Auswahl still aufgehoben
+    haette. Kommt die Rate aus der Modusliste des Monitors, gelten jetzt
+    0,02 Hz; eine bloss nominelle Rate behaelt die weite Toleranz, damit ein
+    Bildschirm, dessen "60" 59,9506 ist, nicht umsonst neu startet.
+    (Die Konstante war ausserdem zweimal deklariert, 0,2 oben und 1,0 unten;
+    die untere verdeckte die obere fuer jeden Aufruf. Jetzt gibt es eine.)
+  * Neue Bildrate 59,95 fps neben 59,94. Die 59,94 der Konsole ist das, was
+    das SDK zusagt - eine bestimmte PS3 an einem bestimmten Fernseher muss
+    aber nicht exakt so laufen. Laeuft sie einen Hauch schneller, passt
+    59,95 besser; tut sie es nicht, schwebt es etwa alle hundert Sekunden
+    einmal. Zum Ausprobieren, nicht als Empfehlung - das Sitzungsprotokoll
+    auf der Konsole entscheidet es.
+    Dafuer musste die Bruchrechnung genauer werden: sie rundete alles ausser
+    59,94 auf ganze Zahlen und erkannte 59,94 an einem 0,01-Band - in das
+    59,95 um 0,0001 hineinfaellt. 59,95 waere also still als 59,94 gesendet
+    worden, also genau als das, wogegen man es messen will. Jetzt liefert
+    jede Rate ihren eigenen exakten Bruch (59,95 = 1199/20).
+  * Die dritte Desktop-Einstellung heisst jetzt "Gleiche Groesse &
+    Bildwiederholrate" statt "Auf 60 Hz drosseln". Der alte Name beschrieb
+    nur die Haelfte: sie setzt den Desktop auch auf die Groesse des Streams,
+    und genau diese Haelfte hat das Bild scharf gemacht.
+  * Neu dazu: "Nur gleiche Groesse". Sie nimmt die Groesse des Streams, laesst
+    dem Bildschirm aber die schnellste Rate, die er dafuer hat - nichts wird
+    umgerechnet, dafuer ist der Takt nicht eingerastet. Interessant vor allem
+    bei 1280x720, wo "Gleiche Groesse & Rate" mangels Vielfachem von 1920x1080
+    herunterskalieren muss, waehrend diese Einstellung 1:1 bleibt.
+  * Die Erklaerungen unter der Auflösungs-Auswahl waren um eins verschoben:
+    960x544 war zu STREAM_SIZES dazugekommen, die Liste der Erklaerungen aber
+    fuenf Eintraege lang geblieben. Jede Groesse zeigte damit den Satz der
+    naechstgroesseren, und Full HD hatte gar keinen mehr - dort blieb einfach
+    der Satz stehen, der vorher da stand, und das ist der laengste Text im
+    Fenster. Die Erklaerungen haengen jetzt an der Groesse selbst statt an
+    ihrer Position, und ein Test zaehlt fuer JEDE Auswahlliste nach, dass
+    Werte, Namen und Erklaerungen gleich lang sind.
+  * Zwei weitere Aufnahmewege sind als Platzhalter eingebaut: kmsgrab (liest
+    den Scanout direkt aus DRM, am Compositor vorbei) und NvFBC (der
+    NVIDIA-Treiber gibt das fertige Bild heraus). Beide sagen genau, was sie
+    hier noch blockiert - kmsgrab braucht DRM-Master oder CAP_SYS_ADMIN,
+    NvFBC laeuft nur unter X11 - und keiner wird von allein gewaehlt.
+    Ueber TEE_CST_CAPTURE=kms|nvfbc|portal|x11|test laesst sich eine Quelle
+    gezielt anfordern; kann sie hier nicht laufen, wird die uebliche genommen.
+    Hintergrund: ein anderes Aufnahmeprogramm (auch OBS) fragt dasselbe
+    GNOME-Portal und bekommt deshalb genau dieselben Bilder.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 18:00:00 +0200
+
+tee-cell-stream-server (1.31.0) unstable; urgency=medium
+
+  * Die 60-Hz-Umschaltung nimmt jetzt ein ganzzahliges VIELFACHES der
+    Bildrate statt nur der Rate selbst. Gemessen auf einem 320-Hz-Monitor:
+    mit dem Desktop auf 59,939 Hz lieferte die Quelle nur 33 Bilder je
+    Sekunde, weil GNOMEs Bildschirmaufnahme etwa jedes zweite Neuzeichnen
+    ausgibt - scharf und gleichmaessig, aber halb so viele Bilder.
+    Bei 119,879 Hz, exakt dem Doppelten, bleibt der Takt gebunden und die
+    Reserve reicht wieder fuer volle 60.
+  * Die Toleranz ist absichtlich absolut (0,5 Hz), denn der Rest IST die
+    Schwebung: ein Modus 0,5 Hz neben seinem Vielfachen wandert alle zwei
+    Sekunden durch ein ganzes Neuzeichnen, einer 0,24 Hz daneben
+    (240,000 gegen 4 x 59,94 = 239,76) alle vier.
+  * Vorrang haben Vielfache ab 2; die einfache Rate bleibt der Rueckfall
+    fuer Monitore, die nichts Schnelleres koennen.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 06:00:00 +0200
+
+tee-cell-stream-server (1.30.0) unstable; urgency=medium
+
+  * Die Gleichmaessigkeitsmessung meldet jetzt ZWEI Rhythmen statt einem:
+    wie gleichmaessig Bilder bei uns ankommen, und wie gleichmaessig der
+    Inhalt der tatsaechlich gesendeten Bilder ist. Bisher gab es nur den
+    zweiten Wert, und der kann nicht zwischen einer ungleichmaessigen
+    Quelle und einer ungleichmaessigen Auswahl unterscheiden.
+  * Damit ist die Frage entscheidbar, die nach den ersten Messungen offen
+    blieb: sind schon die Ankuenfte ungleichmaessig, liegt es an GNOMEs
+    Bildschirmaufnahme oder an der GStreamer-Kette; sind sie gleichmaessig
+    und nur die gesendeten Inhalte nicht, machen wir es selbst kaputt.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 05:45:00 +0200
+
+tee-cell-stream-server (1.29.1) unstable; urgency=medium
+
+  * 59,94 liess sich nicht einstellen: der Setter schrieb int(value) in die
+    Einstellungen, aus 59,94 wurde 59, und weil 59 keine angebotene Stufe
+    ist, fiel der Getter sofort auf 60 zurueck. Die Auswahl sprang also
+    scheinbar von selbst um. Der Wert wird jetzt unveraendert gespeichert
+    - die Stufen werden ohnehin eine Zeile darueber geprueft.
+  * Wer bereits 59 gespeichert hatte, bekommt beim naechsten Start wieder
+    59,94 statt eines stillen 60.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 05:30:00 +0200
+
+tee-cell-stream-server (1.29.0) unstable; urgency=medium
+
+  * Full HD ist jetzt echte 1920x1080 statt 1920x1088. 1080 ist nicht
+    durch 16 teilbar, H.264 rechnet aber in 16x16-Bloecken - der Encoder
+    fuellt also von sich aus auf 1088 Zeilen auf und vermerkt im SPS,
+    dass die unteren acht nicht angezeigt gehoeren. Bisher haben wir die
+    Aufnahme stattdessen auf 1088 Zeilen hochgerechnet: jede Zeile jedes
+    Bildes interpoliert, was Text weichzeichnet, und das Bild 0,74 % zu
+    hoch. Jetzt wird nativ 1080 aufgenommen, ohne jede Umrechnung.
+  * Das setzt die PS3-App v1.0.8 voraus, die den Beschnitt aus dem SPS
+    liest. Aeltere Versionen zeigen mit dieser Serverfassung acht Zeilen
+    Fuellmaterial am unteren Rand - kosmetisch, nicht gefaehrlich.
+  * Wer 1920x1088 gespeichert hatte, bekommt automatisch 1920x1080. Die
+    Altlast-Zuordnung lief bisher andersherum und wurde umgedreht.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 05:25:00 +0200
+
+tee-cell-stream-server (1.28.1) unstable; urgency=medium
+
+  * Auswahlfeld der Aufloesung repariert. In 1.28.0 kam 960x544 zu
+    STREAM_SIZES dazu, die Beschriftungen standen aber in einer zweiten,
+    fest verdrahteten Liste daneben - dadurch fehlte der neue Eintrag und
+    jede Auswahl war um eins verschoben: wer "1280 x 720" waehlte, bekam
+    960x544, und die groesste Auflösung liess sich gar nicht mehr
+    einstellen.
+  * Die Beschriftungen werden jetzt aus STREAM_SIZES abgeleitet. Zwei
+    Listen, die uebereinstimmen muessen, sind eine zu viel.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 05:05:00 +0200
+
+tee-cell-stream-server (1.28.0) unstable; urgency=medium
+
+  * Neue Bildrate 59,94 - die Rate, die der Fernseher an der PS3
+    tatsaechlich zeigt. Bei 60,000 gegen 59,94 verschiebt sich das Bild
+    langsam gegen den Bildaufbau, und alle 16 Sekunden faellt eines
+    doppelt oder aus. Bei 59,94 faellt jedes Bild auf genau einen Aufbau.
+    Sie wird als exakter Bruch 60000/1001 an GStreamer und ffmpeg
+    gegeben, nicht als "59.94" - das waere 5994/100 und um ein Bild alle
+    zehn Stunden daneben.
+  * Neue Raten 145 und 240 sowie die Groesse 960x544. Zusammen mit dem
+    schon vorhandenen Deckel ergibt das die Messleiter fuer den Decoder:
+    Level 4.2 erlaubt 522240 Makrobloecke je Sekunde, also 64 fps bei
+    1920x1088, 145 bei 1280x720 und 256 bei 960x544. Wer mehr waehlt,
+    bekommt automatisch den fuer seine Groesse hoechsten Wert und eine
+    Zeile im Protokoll.
+  * Die Vorgabegroesse heisst jetzt DEFAULT_SIZE statt STREAM_SIZES[0].
+    960x544 steht der Groesse nach vor 720p, und ohne diese Trennung
+    waere es stillschweigend zur neuen Standardaufloesung geworden.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 04:45:00 +0200
+
+tee-cell-stream-server (1.27.0) unstable; urgency=medium
+
+  * Neue Einstellung "Bildrate" mit 30, 50, 55 und 60 fps. Sie steht bei
+    der Bitrate, ist waehrend eines laufenden Streams gesperrt und wird
+    gespeichert. Die PS3 braucht dafuer kein Update - sie nimmt die Rate
+    schon ueberall aus dem SINFO.
+  * Die Auswahl sagt dazu, was man eintauscht. Ein Fernseher zeigt an der
+    PS3 59,94 Bilder pro Sekunde; 30 und 60 gehen darin gleichmaessig auf
+    (rund zwei beziehungsweise ein Bildaufbau je Bild), 50 und 55 nicht -
+    bei 50 bleibt jedes fuenfte Bild doppelt stehen, bei 55 jedes elfte.
+    Dafuer geben die niedrigeren Raten der Konsole mehr Zeit je Bild:
+    33,3 ms bei 30 fps gegen 16,7 bei 60.
+  * Keyframe-Abstand und Refresh-Durchlauf skalieren korrekt mit: der
+    Abstand bleibt bei jeder Rate 0,50 s, der Durchlauf 1,00 s. Das geht
+    nur, weil die beiden Begriffe in 1.26.0 getrennt wurden - haetten sie
+    sich weiter eine Konstante geteilt, waere aus dem Sekunden-Durchlauf
+    bei 30 fps unbemerkt ein Zwei-Sekunden-Durchlauf geworden.
+
+ -- TEE <github@teebug.de>  Thu, 10 Sep 2026 03:30:00 +0200
+
 tee-cell-stream-server (1.26.0) unstable; urgency=medium
 
   * Im Keyframe-Modus kommt jetzt alle 0,5 s ein IDR statt jede Sekunde.

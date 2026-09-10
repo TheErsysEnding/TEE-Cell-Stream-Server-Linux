@@ -155,6 +155,10 @@ GERMAN = {
     'monitor). A borderless window helps at once; for good, the bundled ':
         'Monitor durch). Randloses Fenster hilft sofort; dauerhaft die beiliegende ',
     'mouse and keyboard': 'Maus und Tastatur',
+    # the pad DRIVING the pointer is not the same thing as a keyboard plugged into the console
+    'the pointer and keyboard': 'Zeiger und Tastatur',
+    "pad: unknown key from the console's keyboard (HID 0x%02X)":
+        'Pad: unbekannte Taste von der Tastatur an der Konsole (HID 0x%02X)',
     'neither Mutter (DBus) nor X11 reachable': 'weder Mutter (DBus) noch X11 erreichbar',
     'no %dx%d mode on %s': 'kein Modus %dx%d auf %s',
     'no active mode on the primary monitor': 'kein aktiver Modus auf dem primären Monitor',
@@ -169,6 +173,8 @@ GERMAN = {
     'no video encoder works on this PC (ffmpeg is missing or cannot do H.264)':
         'auf diesem PC funktioniert kein Video-Encoder (ffmpeg fehlt oder kann kein H.264)',
     'nothing from the PS3 for %dms': 'seit %dms nichts von der PS3',
+    'the stream broke off %d times in a row without ever holding - the PS3 cannot keep up with these settings (try a lower bitrate or size)':
+        'der Stream ist %d Mal hintereinander abgerissen, ohne je zu halten - die PS3 kommt mit diesen Einstellungen nicht mit (weniger Bitrate oder kleinere Auflösung)',
     'once, then it enables itself. Until then the picture freezes as soon as a ':
         'anmelden, dann schaltet sie sich von selbst ein. Bis dahin friert das Bild ein, sobald ein ',
     'pad: could not create the virtual gamepad: %s ':
@@ -242,6 +248,26 @@ GERMAN = {
         'video: %d Slice(s) je Bild ab dem nächsten Stream (nur x264)',
     'video: bitrate from the next stream on: %d Mbit/s':
         'video: Bitrate ab dem nächsten Stream: %d Mbit/s',
+    'video: frame rate from the next stream on: %g fps':
+        'video: Bildrate ab dem nächsten Stream: %g fps',
+    'video: end the stream first, then change the frame rate':
+        'video: erst den Stream beenden, dann die Bildrate ändern',
+    'Frame rate':
+        'Bildrate',
+    'The PS3 shows 59.94 pictures a second. 30 and 60 land evenly on that, '
+    '50 and 55 do not – they buy the console time per picture instead':
+        'Die PS3 zeigt 59,94 Bilder pro Sekunde. 30 und 60 gehen gleichmäßig darin auf, '
+        '50 und 55 nicht – dafür geben sie der Konsole mehr Zeit je Bild',
+    ' (even)':
+        ' (gleichmäßig)',
+    ' (slight hitch)':
+        ' (leichter Ruckler)',
+    ' (needs a smaller picture – measures the decoder)':
+        ' (braucht ein kleineres Bild – misst den Decoder)',
+    ' (matches the TV exactly)':
+        ' (trifft den Fernseher genau)',
+    'video: %d fps is more than the PS3 decodes at %dx%d - sending %d':
+        'video: %d fps schafft die PS3 bei %dx%d nicht – es werden %d gesendet',
     'video: entropy coder from the next stream on: ':
         'video: Entropie-Codierung ab dem nächsten Stream: ',
     'video: error correction from the next stream on: ':
@@ -257,6 +283,18 @@ GERMAN = {
     'audio: the sending thread died: %s': 'audio: Sende-Thread gestorben: %s',
     'beacon to %s failed: %s': 'Beacon an %s fehlgeschlagen: %s',
     'capture: preparation failed: %s': 'capture: Vorbereitung fehlgeschlagen: %s',
+    'no DRM device this user may open': 'kein DRM-Gerät, das dieser Benutzer öffnen darf',
+    'the compositor holds DRM master; kmsgrab needs CAP_SYS_ADMIN': 'der Compositor ist DRM-Master; kmsgrab braucht CAP_SYS_ADMIN',
+    'the encoder chain cannot take DRM_PRIME frames yet': 'die Encoder-Kette kann noch keine DRM_PRIME-Bilder annehmen',
+    '%s is not installed': '%s ist nicht installiert',
+    'NvFBC only captures an X11 screen': 'NvFBC nimmt nur einen X11-Bildschirm auf',
+    'the desktop driver refuses NvFBC without the known driver patch': 'der Desktop-Treiber verweigert NvFBC ohne den bekannten Treiber-Patch',
+    'capture: %s is not finished yet (%s)': 'Aufnahme: %s ist noch nicht fertig (%s)',
+    'capture: %s cannot run here (%s) - using the usual source': 'Aufnahme: %s läuft hier nicht (%s) - nehme die übliche Quelle',
+    'capture: TEE_CST_CAPTURE=%s is not a source (%s)': 'Aufnahme: TEE_CST_CAPTURE=%s ist keine Quelle (%s)',
+    'no ScreenCast portal on this desktop': 'kein ScreenCast-Portal auf diesem Desktop',
+    'x11grab needs DISPLAY': 'x11grab braucht DISPLAY',
+    'under Wayland x11grab sees Xwayland, not the desktop': 'unter Wayland sieht x11grab nur Xwayland, nicht den Desktop',
     'capture: x11grab needs DISPLAY': 'capture: x11grab braucht DISPLAY',
     'display: %dx%d was refused (%s), streaming scaled instead':
         'display: %dx%d wurde abgelehnt (%s), streame stattdessen skaliert',

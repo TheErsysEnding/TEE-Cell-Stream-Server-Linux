@@ -44,7 +44,7 @@ from teecellstream.virtual_gamepad import (                               # noqa
     BTN_THUMBL, BTN_THUMBR, BTN_TL, BTN_TR, BTN_X, BTN_Y, DEVICE_NAME, EV_ABS, EV_KEY, EV_SYN, VirtualGamepad,
 )
 
-SENDER = ("10.42.0.151", 38311)
+SENDER = ("192.0.2.151", 38311)
 KEY_Y, KEY_Z, KEY_Q, KEY_APOSTROPHE, KEY_SPACE, KEY_2 = 21, 44, 16, 40, 57, 3
 FRAME_S = 1 / 60
 
@@ -282,7 +282,9 @@ class PadReceiverTests(unittest.TestCase):
         receiver.handle(cp_packet(2, 0, 1, 2, 3, 4), SENDER)
         self.assertEqual(self.desktop.applied, [(0, 1, 2, 3, 4)])
         self.assertIn("pad: now driving a virtual Xbox gamepad", log.get_recent())
-        self.assertIn("pad: now driving mouse and keyboard", log.get_recent())
+        # "the pointer and keyboard", not "mouse and keyboard": since the console can now have a REAL
+        # keyboard plugged into it, the pad standing in for one needs a name of its own
+        self.assertIn("pad: now driving the pointer and keyboard", log.get_recent())
 
     def test_missing_gamepad_keeps_the_mouse_and_asks_only_once(self):
         receiver = self.make(gamepad=FakeGamepad(can_open=False))
@@ -1092,6 +1094,94 @@ class DesktopInputMappingTests(unittest.TestCase):
 # ---------------------------------------------------------------------------- DesktopInput: the real uinput devices
 
 @unittest.skipIf(evdev is None, "python3-evdev fehlt")
+class RealUsbKeyboardAndMouseTests(unittest.TestCase):
+    """A USB keyboard and mouse plugged into the CONSOLE, driving the PC. Distinct from every test above,
+    which is about the pad standing in for a mouse. The console sends raw HID positions and the PC's own
+    layout turns them into characters, so nothing here checks characters - only that the right physical
+    keys go down and, above all, come back up."""
+
+    def make(self):
+        self.mouse, self.keyboard = FakeEmitter(), FakeEmitter()
+        return DesktopInput(layout="de", clock=FakeClock(),
+                            open_devices=lambda: (self.mouse, self.keyboard))
+
+    @staticmethod
+    def code(name):
+        from evdev import ecodes
+        return ecodes.ecodes[name]
+
+    def test_a_key_goes_down_once_and_up_once(self):
+        desktop = self.make()
+        for _ in range(4):                       # held across four reports, as a real keyboard repeats
+            desktop.apply_hid(0, (0x04,), 0, 0, 0, 0)
+        desktop.apply_hid(0, (), 0, 0, 0, 0)
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_A")), [1, 0],
+                         "a held key was re-pressed on every report")
+
+    def test_the_layout_is_the_pcs_business_not_ours(self):
+        """HID 0x1C is the key where a US board has Y and a German one has Z. We must send the POSITION
+        and let the PC decide - so the emitted code is KEY_Y either way, and the German layout on the PC
+        is what makes a Z come out."""
+        desktop = self.make()
+        desktop.apply_hid(0, (0x1C,), 0, 0, 0, 0)
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_Y")), [1])
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_Z")), [])
+
+    def test_modifiers_come_from_their_own_bits(self):
+        desktop = self.make()
+        desktop.apply_hid(0x01 | 0x02, (0x06,), 0, 0, 0, 0)      # left ctrl + left shift + c
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_LEFTCTRL")), [1])
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_LEFTSHIFT")), [1])
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_C")), [1])
+        desktop.apply_hid(0, (), 0, 0, 0, 0)
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_LEFTCTRL")), [1, 0])
+
+    def test_a_lost_packet_cannot_leave_a_key_stuck(self):
+        """The report is state, not events: whatever is missing from it is released. That is what makes a
+        dropped datagram cost one frame instead of a key held down until the user reboots."""
+        desktop = self.make()
+        desktop.apply_hid(0, (0x04, 0x05, 0x06), 0, 0, 0, 0)
+        desktop.apply_hid(0, (0x05,), 0, 0, 0, 0)                # b survives, a and c vanished
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_A")), [1, 0])
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_C")), [1, 0])
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_B")), [1])
+
+    def test_the_stream_ending_releases_a_held_key(self):
+        """Somebody holding a key when the console disconnects must not leave it down on the PC."""
+        desktop = self.make()
+        desktop.apply_hid(0x01, (0x04,), protocol.HID_BTN_LEFT, 0, 0, 0)
+        desktop.release_all()
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_A")), [1, 0])
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_LEFTCTRL")), [1, 0])
+        self.assertEqual(self.mouse.values(EV_KEY, BTN_LEFT), [1, 0])
+
+    def test_a_diagonal_move_is_one_frame(self):
+        desktop = self.make()
+        desktop.apply_hid(0, (), 0, -7, 3, 0)
+        self.assertEqual(1, self.mouse.events.count("SYN"), "x and y arrived as two separate moves")
+
+    def test_an_unknown_usage_is_ignored_not_guessed(self):
+        desktop = self.make()
+        desktop.apply_hid(0, (0x04, 0xFE), 0, 0, 0, 0)           # 0xFE is not a key
+        self.assertEqual(self.keyboard.values(EV_KEY, self.code("KEY_A")), [1])
+
+    def test_the_rollover_marker_is_not_a_key(self):
+        """usage 1 is the keyboard saying "too many keys at once", not a key."""
+        desktop = self.make()
+        desktop.apply_hid(0, (1, 1, 1), 0, 0, 0, 0)
+        self.assertEqual([], self.keyboard.keys())
+
+    def test_the_packet_round_trips(self):
+        report = (0x02, (0x04, 0x1C), protocol.HID_BTN_RIGHT, -300, 42, -3)
+        self.assertEqual(report, protocol.parse_hid_packet(protocol.build_hid_packet(*report)))
+
+    def test_a_malformed_packet_is_refused(self):
+        for bad in (b"", b"HID", b"HID " + bytes(7), b"XXXX" + bytes(20),
+                    protocol.build_hid_packet(0, (1,) * 6, 0, 0, 0, 0)[:-1],
+                    b"HID " + bytes([0, protocol.HID_MAX_KEYS + 1, 0, 0]) + bytes(4)):
+            self.assertIsNone(protocol.parse_hid_packet(bad), repr(bad))
+
+
 class DesktopInputDeviceTests(unittest.TestCase):
     """Reads back from the virtual mouse and keyboard. Both nodes are grabbed first, so the real
     desktop never sees the click, the Super key or the typed letters; the pointer motion is 1 px."""

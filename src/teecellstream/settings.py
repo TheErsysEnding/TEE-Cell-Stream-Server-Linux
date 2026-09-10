@@ -11,6 +11,7 @@ SETTINGS_PATH = os.environ.get("TEE_CST_SETTINGS_PATH") or os.path.join(_CONFIG_
 DEFAULTS = {
     "encoder": None,                       # encoder kind ("nvenc" | "vaapi" | "x264"); None = best available
     "loss_recovery": "intra",              # "intra" (intra refresh, default) | "keyframe"
+    "stream_fps": 60,                      # pictures per second sent to the PS3; see protocol.FPS_CHOICES
     "video_kbps": 6000,                    # video bitrate; the PS3's decoder, not the link, is the limit
     "stream_size": "1280x720",             # what the PS3 gets; the larger sizes cost the SPU decoder roughly in proportion
     "entropy_coder": "cavlc",              # "cavlc" (cheap for the PS3 to decode) | "cabac" (the Windows original)

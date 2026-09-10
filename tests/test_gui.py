@@ -51,7 +51,7 @@ gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Adw, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
-from teecellstream import APP_EXEC, autostart, log, protocol, tray, ui  # noqa: E402
+from teecellstream import APP_EXEC, autostart, display_mode, log, protocol, tray, ui  # noqa: E402
 from teecellstream import app as app_module  # noqa: E402
 from teecellstream import settings as settings_module  # noqa: E402
 from teecellstream.app import ALREADY_RUNNING_TEXT, CellStreamApplication, install_crash_log  # noqa: E402
@@ -118,6 +118,7 @@ class MockServer:
         self.entropy_coder = "cavlc"
         self.rate_control = "vbr"
         self.stream_size = (1280, 720)
+        self.stream_fps = protocol.FPS      # the window reads it to preselect the frame-rate row
         self.slice_count = 1
         self.captured_fps = 0               # what the desktop capture delivers; 0 = no stream, no readout
         self.swap_mouse_sticks = False
@@ -347,7 +348,7 @@ class MainWindowTest(unittest.TestCase):
                 self.assertEqual("NVIDIA GPU (NVENC)", window.encoder_model.get_string(0))
                 self.assertEqual(0, window.encoder_row.get_selected())
                 self.assertEqual(0, window.recovery_row.get_selected())
-                self.assertEqual(1, window.display_row.get_selected())   # "capture", the default
+                self.assertEqual(1, window.display_row.get_selected())   # "capture" - what MockServer holds
                 self.assertFalse(window.swap_sticks_row.get_active())
                 self.assertIsNotNone(window.view_stack.get_child_by_name("server"))
                 self.assertIsNotNone(window.view_stack.get_child_by_name("commands"))
@@ -385,12 +386,12 @@ class MainWindowTest(unittest.TestCase):
                 mock.is_armed = True
                 mock.trip_reason = None
                 mock.is_ps3_connected = True
-                mock.connected_ps3 = "10.42.0.151"
+                mock.connected_ps3 = "192.0.2.151"
                 mock.captured_fps = 70      # a source over the grid: the status line has to say so
 
             def connected():
                 window = holder["window"]
-                self.assertEqual(ui.STATUS_CONNECTED + "10.42.0.151", window.status_label.get_text())
+                self.assertEqual(ui.STATUS_CONNECTED + "192.0.2.151", window.status_label.get_text())
                 subtitle = window.subtitle_label.get_text()
                 self.assertTrue(subtitle.startswith(mock.settings_summary), subtitle)
                 self.assertIn("source 70/s", subtitle)
@@ -521,7 +522,7 @@ class MainWindowTest(unittest.TestCase):
                 self.assertIn("1280x720", window.subtitle_label.get_text())
                 self.assertEqual(4000, mock.video_kbps, "following the server must not write back to it")
                 mock.is_ps3_connected = True
-                mock.connected_ps3 = "10.42.0.151"
+                mock.connected_ps3 = "192.0.2.151"
 
             def locked_while_streaming():
                 window = holder["window"]
@@ -683,7 +684,7 @@ class MainWindowTest(unittest.TestCase):
                         mock.entropy_coder = protocol.ENTROPY_CODERS[tick % len(protocol.ENTROPY_CODERS)]
                         mock.loss_recovery = ui.LOSS_RECOVERY_KINDS[tick % len(ui.LOSS_RECOVERY_KINDS)]
                         mock.is_ps3_connected = bool(tick % 2)
-                        mock.connected_ps3 = "10.42.0.151" if tick % 2 else None
+                        mock.connected_ps3 = "192.0.2.151" if tick % 2 else None
                         tick += 1
                         time.sleep(0.002)
                 threading.Thread(target=churn, name="gui-churn", daemon=True).start()
@@ -707,6 +708,39 @@ class MainWindowTest(unittest.TestCase):
 
 
 @unittest.skipIf(not HAVE_DISPLAY, "no display")
+class ChoiceListsMatchTest(unittest.TestCase):
+    """Every dropdown is three lists that must agree: the values, the names shown, and the sentence
+    written underneath the row. This has now gone wrong twice in the same way - a value added to
+    protocol without its counterpart here - and both times it was silent. First the names slid out of
+    step, so picking "1280 × 720" set 960 × 544; then the explanations did, so every size showed the
+    sentence of the next one up and Full HD, having none left, simply kept whichever sentence had been
+    standing there before. That stale sentence is the longest text in the window, which is how it was
+    noticed at all. Counting them is cheap; finding it by eye is not."""
+
+    def _check(self, name, values, labels, hints=None):
+        self.assertEqual(len(values), len(labels), "%s: %d values but %d names" % (name, len(values), len(labels)))
+        if hints is not None:
+            self.assertEqual(len(values), len(hints), "%s: %d values but %d explanations" % (name, len(values), len(hints)))
+            for index, hint in enumerate(hints):
+                self.assertTrue(hint.strip(), "%s: entry %d has no explanation" % (name, index))
+
+    def test_every_dropdown_has_a_name_and_a_sentence_per_value(self):
+        self._check("Resolution", protocol.STREAM_SIZES, ui.size_labels(), ui.size_hints())
+        self._check("Entropy coder", protocol.ENTROPY_CODERS, ui.ENTROPY_LABELS, ui.ENTROPY_HINTS)
+        self._check("Rate control", protocol.RATE_CONTROLS, ui.RATE_LABELS, ui.RATE_HINTS)
+        self._check("Slices", protocol.SLICE_COUNTS, ui.SLICE_LABELS, ui.SLICE_HINTS)
+        self._check("Error correction", ui.LOSS_RECOVERY_KINDS, ui.LOSS_RECOVERY_LABELS, ui.LOSS_RECOVERY_HINTS)
+        self._check("Desktop", display_mode.DISPLAY_STRATEGIES, ui.DISPLAY_LABELS, ui.DISPLAY_HINTS)
+        self._check("Frame rate", protocol.FPS_CHOICES, ui.fps_labels())
+        self._check("Bitrate", protocol.BITRATE_CHOICES_KBPS, ui.bitrate_labels())
+
+    def test_every_size_has_its_own_sentence_and_not_a_neighbours(self):
+        """The mapping is keyed by the size, so a new size shows a placeholder rather than borrowing."""
+        for size in protocol.STREAM_SIZES:
+            self.assertIn(size, ui.SIZE_HINT_BY_SIZE, "%d × %d has no explanation of its own" % size)
+        self.assertEqual(len(set(ui.size_hints())), len(protocol.STREAM_SIZES), "two sizes share one sentence")
+
+
 class ApplicationTest(unittest.TestCase):
     def _make_app(self, notifications):
         mock = MockServer()
@@ -730,10 +764,10 @@ class ApplicationTest(unittest.TestCase):
             self.assertIsNotNone(app.tray)
             self.assertTrue(app.tray.is_started or not HAVE_WATCHER)
             mock.is_ps3_connected = True
-            mock.connected_ps3 = "10.42.0.151"
+            mock.connected_ps3 = "192.0.2.151"
 
         def connected():
-            self.assertEqual([("ps3", "PS3 connected", "10.42.0.151 is streaming.")], notifications)
+            self.assertEqual([("ps3", "PS3 connected", "192.0.2.151 is streaming.")], notifications)
             self.assertEqual(tray.ICON_LIVE, app.tray.icon_name)
             mock.is_ps3_connected = False
             mock.connected_ps3 = None
@@ -1330,9 +1364,9 @@ class ArchitectureTest(unittest.TestCase):
     def test_the_window_and_the_tray_agree_on_the_status_line(self):
         # app.py writes the tray tooltip, ui.py the status card - one function, so they cannot drift
         self.assertEqual(ui.STATUS_STOPPED, ui.status_text(False, False, ""))
-        self.assertEqual(ui.STATUS_STOPPED, ui.status_text(False, True, "10.42.0.151"))
+        self.assertEqual(ui.STATUS_STOPPED, ui.status_text(False, True, "192.0.2.151"))
         self.assertEqual(ui.STATUS_WAITING, ui.status_text(True, False, ""))
-        self.assertEqual(ui.STATUS_CONNECTED + "10.42.0.151", ui.status_text(True, True, "10.42.0.151"))
+        self.assertEqual(ui.STATUS_CONNECTED + "192.0.2.151", ui.status_text(True, True, "192.0.2.151"))
 
 
 class OldSettingsFileTest(unittest.TestCase):

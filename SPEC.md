@@ -80,7 +80,11 @@ Threads: `threading.Thread(daemon=True, name=...)`. Alles muss auch ohne GUI (he
 | PADMODE | `PADMODE gamepad` / `PADMODE mouse` (1×/s) |
 | KEY | `KEY <byte>` — genau 1 Zeichen nach `KEY ` (`\b` Backspace, `\t` Tab, `\n` Return, sonst ASCII) |
 | CUSTOM | `CUSTOM <1-4>` |
+| HID | `"HID "` + Modifier(1) + Tastenzahl(1) + Maustasten(1) + Rad(int8) + dx(int16 BE) + dy(int16 BE) + n×Usage(uint16 BE) — echte USB-Tastatur/Maus an der Konsole; **rohe HID-Usages (Positionen), keine Zeichen** → das Layout des PCs entscheidet. Zustand, keine Ereignisse. |
 | Timeouts | CLIENT_TIMEOUT_MS 3000 (nach erstem CP), STREAM_STARTUP_GRACE_MS 10000 (vor erstem CP), WATCHDOG_TICK_MS 500 |
+| Aufgeben | FAULTY_SESSIONS_BEFORE_GIVING_UP 3, SHORT_SESSION_SECONDS 20, RECONNECT_KEEP_MODE_SECONDS 6, STORM_WINDOW_SECONDS 60 (siehe server.py) |
+| Bildraten | FPS_CHOICES 30, 50, 55, 59.94, **59.95**, 60, 90, 120, 145, 240; `fps_fraction()` liefert exakte Brueche (59.94 → 60000/1001, 59.95 → 1199/20) |
+| Desktop | DISPLAY_STRATEGIES off, capture, sixty (gleiche Groesse + ganzes Vielfaches der Rate), **size** (gleiche Groesse, schnellste Rate dafuer) |
 
 PadBits (Bit-Positionen in `buttons`): UP=0 DOWN=1 LEFT=2 RIGHT=3 CROSS=4 CIRCLE=5 SQUARE=6 TRIANGLE=7 L1=8 R1=9 L2=10 R2=11 START=12 SELECT=13 L3=14 R3=15.
 
@@ -160,17 +164,25 @@ sonst rückgängig machen, während Fenster und Log weiter CAVLC behaupten. Sons
 ### capture.py + portal.py
 ```python
 class ScreenCapture:                       # Basisklasse
-    name: str                              # "portal" | "x11grab" | "test"
+    name: str                              # "portal" | "x11grab" | "test" | "kmsgrab" | "nvfbc"
     def start(self, width, height, fps) -> bool
+    @classmethod
+    def unavailable_reason(cls) -> str      # "" = koennte hier laufen; sonst der Grund, der es verhindert
     def ffmpeg_input_args(self) -> list[str]
     needs_scale: bool                      # True nur bei x11grab
     def feed(self, ffmpeg_stdin) -> None   # blockiert bis stop(); Roh-Pipe-Backends schreiben hier Frames
     def stop(self) -> None
     captured_fps: int                      # Statistik (Frames vom Quell-Backend in der letzten Sekunde)
-def create_capture() -> ScreenCapture      # Auswahl: TEE_CST_TEST_SOURCE=1 → TestCapture; Portal verfügbar → PortalCapture; DISPLAY gesetzt → X11Capture; sonst None
+BACKENDS: dict[str, type]                  # {"portal", "x11", "test", "kms", "nvfbc"} → Klasse; die Namen, die TEE_CST_CAPTURE nimmt
+def create_capture() -> ScreenCapture      # Auswahl: TEE_CST_CAPTURE=<name> wenn unavailable_reason() leer ist; sonst TEE_CST_TEST_SOURCE=1 → TestCapture; Portal verfügbar → PortalCapture; DISPLAY gesetzt → X11Capture; sonst None
 def warm_up() -> None                      # Serverstart: wenn Portal-Backend und kein restore_token gespeichert → Dialog jetzt zeigen, Token sichern, Session schließen. Sonst no-op.
 ```
-Umgebungsvariablen für Tests: `TEE_CST_TEST_SOURCE=1` (Testquelle statt Portal), `TEE_CST_NO_DISPLAY_SWITCH=1` (server.py schaltet den Desktop nicht um),
+**KmsCapture** (`kms`) und **NvfbcCapture** (`nvfbc`) sind Platzhalter: verdrahtet, aber nicht fertig. Beide geben in `start()` `False` zurück und nennen den Grund.
+kmsgrab liest den Scanout direkt aus DRM (am Compositor vorbei) — braucht DRM-Master oder `CAP_SYS_ADMIN` und in `encoders.py` eine `hwmap`/`hwdownload`-Stufe für DRM_PRIME-Frames.
+NvFBC (`libnvidia-fbc.so.1`) gibt das fertige Bild aus dem Treiber — nur X11, und der Desktop-Treiber verweigert es ohne den bekannten Treiber-Patch; ffmpeg hat keinen nvfbc-Input, es bräuchte einen Helfer, der in die Pipe schreibt.
+Beides ist die Antwort auf dieselbe Frage: ein anderes Aufnahmeprogramm (auch OBS) fragt dasselbe GNOME-Portal und bekommt genau dieselben Bilder — nur eine Quelle am Compositor vorbei ändert daran etwas.
+
+Umgebungsvariablen für Tests: `TEE_CST_TEST_SOURCE=1` (Testquelle statt Portal), `TEE_CST_CAPTURE=<name>` (Quelle gezielt anfordern, Rückfall auf die übliche), `TEE_CST_NO_DISPLAY_SWITCH=1` (server.py schaltet den Desktop nicht um),
 `TEE_CST_SETTINGS_PATH`, `TEE_CST_LOG_PATH` (eigene Dateien statt der echten). Kein Test darf ohne explizite Opt-in-Variable
 (`TEE_CST_PORTAL_TEST=1`, `TEE_CST_DISPLAY_TEST=1`) einen Portal-Dialog auslösen oder die Auflösung umschalten.
 - **PortalCapture** (Wayland und GNOME-X11): `portal.ScreenCastSession` (Gio.DBus, Session-Bus,
@@ -424,6 +436,17 @@ aussieht (`^[a-zA-Z][a-zA-Z0-9+.-]*://`) → `xdg-open <uri>`, sonst `sh -c <val
 Siehe Datei. Wichtig für alle Module: `Server` hält `stream_lock`, PLAY läuft im Empfangsthread:
 `keep_display_awake(True)` → `display_mode.match_to(1280,720,60)` (nur wenn `switch_display_mode`) → `live_streamer.start(sender)` → `audio_streamer.start(sender)`.
 Stop (STOP, Watchdog, Shutdown): `live_streamer.stop()`, `audio_streamer.stop()`, `pad_receiver.release()`, `display_mode.restore()`, `keep_display_awake(False)`.
+
+`stop_streaming(why, user_stop=False)`: gezählt wird, ob die Sitzung **gehalten** hat, nicht wer sie beendet hat.
+Kürzer als `SHORT_SESSION_SECONDS` (20 s) → `_faulty_sessions` hoch; ab `FAULTY_SESSIONS_BEFORE_GIVING_UP` (3) läuft `trip_fuse()` und der Server stoppt.
+Liegen zwischen zwei Abbrüchen mehr als `STORM_WINDOW_SECONDS` (60 s), beginnt die Zählung von vorn — nur ein Bündel zählt.
+`user_stop=True` gibt es nur für den Stopp-Knopf im eigenen Fenster (`disarm()`) und das Herunterfahren; nichts aus dem Netz darf das behaupten.
+**Wichtig — der Fehler von 1.32.0:** dort zählte nur `fault=True` (Watchdog/Encoder), und das STOP-Paket der PS3 galt als gewollt.
+Die Konsole schickt aber selbst STOP, wenn sie die Bitrate nicht schafft, und verbindet sofort neu (gemessen: 32× im 2-s-Takt) — jedes davon
+setzte den Zähler zurück. Deshalb ist „wer hat beendet" kein taugliches Kriterium.
+Bei einer Sitzung, die nicht gehalten hat, wird `display_mode.restore()` **nicht** sofort gerufen, sondern `_restore_due = jetzt + RECONNECT_KEEP_MODE_SECONDS` (6 s) gesetzt;
+ein PLAY innerhalb dieses Fensters löscht es wieder (der Modus steht ja noch), sonst holt der Watchdog den Restore nach.
+Grund: das Zurück-und-wieder-Hin bei jedem Neuversuch ist es, was den PC-Bildschirm wiederholt schwarz werden ließ, nicht der Abriss selbst.
 
 ## Tests (tests/)
 - Unit-Tests je Modul (unittest): Fragment-Header-Layout, Splitter mit echtem nvenc-Output (ffmpeg lavfi → h264-Datei als Fixture erzeugen),

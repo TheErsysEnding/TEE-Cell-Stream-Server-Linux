@@ -60,10 +60,11 @@ class LiveStreamer:
     # burst overruns it and the picture freezes until the next one.
     def __init__(self, sock, ffmpeg_path, fps, kbps, width, height, send_rate_kbps, create_capture,
                  encoders_to_try, loss_recovery, on_all_encoders_failed, video_kbps=None, entropy_coder=None,
-                 stream_size=None, rate_control=None, slice_count=None):
+                 stream_size=None, rate_control=None, slice_count=None, stream_fps=None):
         self._sock = sock
         self._ffmpeg_path = ffmpeg_path
         self._fps = fps
+        self._stream_fps = stream_fps
         self._kbps = kbps
         self._width = width
         self._height = height
@@ -101,6 +102,23 @@ class LiveStreamer:
         chosen = self._video_kbps() if callable(self._video_kbps) else self._video_kbps
         return int(self._kbps if chosen is None else chosen)
 
+    def _current_fps(self, width: int, height: int) -> float:
+        """The user's frame rate, read fresh for each stream and capped by what the console can be
+        asked for at this picture size (protocol.max_fps_for_level42).
+
+        The cap is not politeness: above level 4.2 cellVdec refuses the stream altogether, so an
+        uncapped 120 fps at 1920x1088 would give a black screen rather than a fast one."""
+        chosen = self._stream_fps() if callable(self._stream_fps) else self._stream_fps
+        # float, not int: 59.94 must survive as 59.94 - int() would silently make it 59 and the
+        # whole point of matching the television's rate would be gone.
+        wanted = float(self._fps if chosen is None else chosen)
+        ceiling = protocol.max_fps_for_level42(width, height)
+        if ceiling and wanted > ceiling:
+            log.write(_("video: %d fps is more than the PS3 decodes at %dx%d - sending %d")
+                      % (wanted, width, height, ceiling))
+            return ceiling
+        return wanted
+
     def _current_send_rate_kbps(self) -> int:
         """Packets may leave faster than the video's own rate, as in the original (3x: SEND_RATE_KBPS =
         KBPS * 3). Keep that ratio when the user picks another bitrate - at a fixed 30000 the pacer would
@@ -116,7 +134,7 @@ class LiveStreamer:
     def _level_for(self, width: int, height: int) -> int:
         """The H.264 level to announce for this picture size, never below the 4.2 the console was proven
         with. Takes the size explicitly so it can never disagree with the size in the same SINFO."""
-        return max(self._sinfo_level, protocol.sinfo_level_for(width, height, self._fps))
+        return max(self._sinfo_level, protocol.sinfo_level_for(width, height, self._current_fps(width, height)))
 
     def _current_rate_control(self) -> str:
         """"vbr", "quality" or "cbr"; anything unknown (including None) falls back to the proven "vbr"."""
@@ -208,7 +226,10 @@ class LiveStreamer:
         # The trailing encoder name is an extension. The PS3's parser reads six numbers and stops, so an
         # older console ignores it; a newer console shows "-" when an older server leaves it out.
         info = ("SINFO %d %d %d %d %d %d %s" % (width, height, self._level_for(width, height), protocol.SINFO_REFS,
-                                                self._fps, 1 if intra else 0, kind)).encode("ascii")
+                                                round(self._current_fps(width, height)), 1 if intra else 0, kind)).encode("ascii")
+        # SINFO's fps field is an integer in the protocol, so a fractional rate is announced rounded.
+        # The console uses it only for the recorder's nominal frame duration and for the stats line;
+        # 60 against a true 59.94 is 0.1 % out, and the real timing comes from the capture stamps.
         try:
             for _ in range(3):
                 self._sock.sendto(info, target)
@@ -306,7 +327,7 @@ class LiveStreamer:
             return None
         session.capture = capture
         try:
-            started = capture.start(session.width, session.height, self._fps)
+            started = capture.start(session.width, session.height, self._current_fps(session.width, session.height))
         except Exception as error:   # noqa: BLE001
             log.write(_("live: screen capture (%s) aborted: %s") % (capture.name, error))
             started = False
@@ -325,7 +346,7 @@ class LiveStreamer:
         loss_recovery = "intra" if session.intra else "keyframe"   # what SINFO promised, whatever rung this is
         try:
             args = encoders.build_ffmpeg_args(self._ffmpeg_path, encoder, input_args, session.width, session.height,
-                                              self._fps, self._current_kbps(), loss_recovery, capture.needs_scale,
+                                              self._current_fps(session.width, session.height), self._current_kbps(), loss_recovery, capture.needs_scale,
                                               self._current_entropy_coder(), self._current_rate_control(),
                                               self._current_slice_count())
             process = _spawn_ffmpeg(args, raw_pipe)

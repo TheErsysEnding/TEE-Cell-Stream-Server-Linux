@@ -82,13 +82,13 @@ IP_SAMPLE = json.dumps([
     {"ifindex": 1, "ifname": "lo", "flags": ["LOOPBACK", "UP", "LOWER_UP"], "operstate": "UNKNOWN",
      "addr_info": [{"family": "inet", "local": "127.0.0.1", "prefixlen": 8, "scope": "host", "label": "lo"}]},
     {"ifindex": 2, "ifname": "enp4s0", "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], "operstate": "UP",
-     "addr_info": [{"family": "inet", "local": "10.42.0.1", "prefixlen": 24, "broadcast": "10.42.0.255",
+     "addr_info": [{"family": "inet", "local": "192.0.2.1", "prefixlen": 24, "broadcast": "192.0.2.255",
                     "scope": "global", "noprefixroute": True, "label": "enp4s0"}]},
     {"ifindex": 3, "ifname": "enp5s0", "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"], "operstate": "UP",
-     "addr_info": [{"family": "inet", "local": "192.168.1.50", "prefixlen": 24, "broadcast": "192.168.1.255",
+     "addr_info": [{"family": "inet", "local": "198.51.100.50", "prefixlen": 24, "broadcast": "198.51.100.255",
                     "scope": "global", "dynamic": True, "label": "enp5s0"}]},
     {"ifindex": 4, "ifname": "virbr0", "flags": ["NO-CARRIER", "BROADCAST", "MULTICAST", "UP"], "operstate": "DOWN",
-     "addr_info": [{"family": "inet", "local": "192.168.122.1", "prefixlen": 24, "broadcast": "192.168.122.255",
+     "addr_info": [{"family": "inet", "local": "203.0.113.1", "prefixlen": 24, "broadcast": "203.0.113.255",
                     "scope": "global", "label": "virbr0"}]},
 ])
 
@@ -96,11 +96,11 @@ IP_SAMPLE = json.dumps([
 class NetinfoTests(unittest.TestCase):
     def test_captured_sample(self):
         targets = netinfo.parse_beacon_targets(IP_SAMPLE)
-        self.assertEqual(targets, [("255.255.255.255", 38311), ("10.42.0.255", 38311), ("192.168.1.255", 38311)])
+        self.assertEqual(targets, [("255.255.255.255", 38311), ("192.0.2.255", 38311), ("198.51.100.255", 38311)])
 
     def test_global_first_and_port(self):
         self.assertEqual(netinfo.parse_beacon_targets("[]"), [("255.255.255.255", protocol.BEACON_PORT)])
-        self.assertEqual(netinfo.parse_beacon_targets(IP_SAMPLE, port=4711)[1], ("10.42.0.255", 4711))
+        self.assertEqual(netinfo.parse_beacon_targets(IP_SAMPLE, port=4711)[1], ("192.0.2.255", 4711))
 
     def test_dedup_derived_and_skipped_links(self):
         sample = json.dumps([
@@ -783,8 +783,13 @@ class DisplayModeRealTests(unittest.TestCase):
         primary = state.primary_logical_monitor()
         self.assertEqual(primary.connectors[0], "DP-2")
         monitor = state.find_monitor("DP-2")
-        self.assertEqual(monitor.current_mode().id, "2560x1440@320.001")
-        self.assertEqual(monitor.current_mode().refresh, 320.00146484375)
+        # NOT a fixed mode id: the desktop may legitimately be sitting somewhere else right now - the
+        # server switches it while streaming and holds it across a reconnect, and a mode left over from
+        # that failed this test with '1920x1080@240.000' though nothing was wrong. What the reader has to
+        # get right is that the current mode is one the monitor actually has.
+        current = monitor.current_mode()
+        self.assertIn(current.id, [candidate.id for candidate in monitor.modes])
+        self.assertGreater(current.refresh, 0.0)
         mode = display_mode.find_mode(monitor.modes, 1280, 720, 60)
         self.assertEqual(mode.id, "1280x720@60.000")
         self.assertFalse(mode.is_variable_rate)
@@ -804,7 +809,9 @@ class DisplayModeRealTests(unittest.TestCase):
             self.assertIn("nderscanning", str(refused.exception))
         after = display_mode.read_current_state()
         self.assertEqual(after.serial, state.serial, "VERIFY hat die Anzeige verändert?!")
-        self.assertEqual(after.find_monitor("DP-2").current_mode().id, "2560x1440@320.001")
+        # against what it was when this test started, not against a fixed mode: the point is that VERIFY
+        # left it alone, whatever it was
+        self.assertEqual(after.find_monitor("DP-2").current_mode().id, current.id)
 
     @unittest.skipUnless(MUTTER_ON_BUS, "org.gnome.Mutter.DisplayConfig nicht auf dem Session-Bus")
     def test_real_backend_selection_is_mutter(self):
@@ -900,20 +907,144 @@ class ChooseCaptureModeTests(unittest.TestCase):
         self.assertTrue(mode.match_to(2560, 1440, 60.0))
         self.assertNotIn("switch", [call[0] if isinstance(call, tuple) else call for call in backend.calls])
 
-    def test_sixty_hz_strategy_puts_the_desktop_on_the_streams_own_clock(self):
-        """The point of the "sixty" strategy: no beat. The compositor, our grid and the console all tick
-        at 60, so no picture can be superseded before its slot - which is what 15 % of them were."""
+    def test_sixty_hz_strategy_puts_the_desktop_on_a_multiple_of_the_streams_clock(self):
+        """The point of the "sixty" strategy is no BEAT, which an integer multiple gives just as well as
+        the rate itself - at 2x every second repaint is a slot.
+
+        It used to demand exactly 60, and that was measured to starve the capture: with the desktop at
+        59.939 Hz the source delivered 33 pictures a second, because GNOME's ScreenCast hands out
+        roughly every other repaint. A multiple keeps the phase locked AND leaves that headroom."""
         for width, height in ((1280, 720), (1536, 864), (1920, 1088)):
             chosen = display_mode.choose_sixty_hz_mode(self._developer_monitor(), width, height, 60)
-            self.assertAlmostEqual(60.0, chosen[2], places=1, msg="%dx%d" % (width, height))
+            multiple = chosen[2] / 60.0
+            self.assertAlmostEqual(round(multiple), multiple, places=2,
+                                   msg="%dx%d chose %g Hz, not a multiple of 60" % (width, height, chosen[2]))
             self.assertGreaterEqual(chosen[0], width)
             self.assertGreaterEqual(chosen[1], height)
 
     def test_the_two_strategies_really_differ(self):
-        # capture takes the most refresh it can use, sixty takes exactly 60 - on this monitor, of the same size
+        # capture takes the most refresh it can use whatever the ratio; sixty insists on a whole
+        # multiple. This monitor's 1080p tops out at 240 = exactly 4 x 60, so here they agree on the
+        # rate and the test pins what actually distinguishes them: capture accepts a ratio that is
+        # not whole, sixty does not.
         modes = self._developer_monitor()
         self.assertEqual(240.0, display_mode.choose_capture_mode(modes, 1280, 720, 60)[2])
-        self.assertEqual(60.0, display_mode.choose_sixty_hz_mode(modes, 1280, 720, 60)[2])
+        self.assertEqual(0.0, display_mode.choose_sixty_hz_mode(modes, 1280, 720, 60)[2] % 60.0)
+
+        # a screen whose fastest mode is NOT a multiple: capture takes it, sixty refuses and drops to 60
+        odd = [self._mode(1920, 1080, 165.0), self._mode(1920, 1080, 60)]
+        self.assertEqual(165.0, display_mode.choose_capture_mode(odd, 1280, 720, 60)[2])
+        self.assertEqual(60.0, display_mode.choose_sixty_hz_mode(odd, 1280, 720, 60)[2])
+
+    def test_the_closest_of_two_equal_multiples_wins(self):
+        """Measured on the development screen: 1920x1080 exists at 119.8788 Hz AND at 119.9302 Hz, and only
+        the first is exactly 2 x 59.94. Both pass the 0.5 Hz tolerance, so the choice used to fall to whichever
+        the compositor listed first - and the leftover IS the beat: 0.05 Hz walks the phase through a whole
+        repaint every 20 seconds, which is the hitch that is still felt on an otherwise clean stream."""
+        modes = [self._mode(1920, 1080, 119.9302), self._mode(1920, 1080, 119.8788)]
+        self.assertAlmostEqual(119.8788, display_mode.choose_sixty_hz_mode(modes, 1920, 1080, 59.94)[2], places=4)
+        # and the other way round in the list: order must not decide this
+        self.assertAlmostEqual(119.8788, display_mode.choose_sixty_hz_mode(modes[::-1], 1920, 1080, 59.94)[2], places=4)
+
+    def test_already_there_can_tell_the_two_120_hz_modes_apart(self):
+        """The companion to the test above: choosing 119.8788 is worthless if a desktop already sitting on
+        119.9302 counts as 'already there'. The old 1.0 Hz tolerance did exactly that and silently cancelled
+        the choice - the two modes are 0.05 Hz apart."""
+        backend = _FakeBackend(1920, 1080, refresh=119.9302)
+        mode = display_mode.DisplayMode(backend)
+        self.assertTrue(mode.match_to(1920, 1080, 119.8788, display_mode.SAME_RATE_TOLERANCE_HZ))
+        self.assertIn(("switch", 1920, 1080, 119.8788), backend.calls)
+
+    def test_a_repeat_play_does_not_re_arm_the_confirmation(self):
+        """The PS3 re-sends PLAY on every reconnect, and match_for_capture ran arm_confirmation() each
+        time - which cleared a confirmation the user had already given and stacked a second dialog on the
+        first. The log shows it as two "picture confirmed" lines less than a second apart."""
+        backend = _FakeBackend(2560, 1440, refresh=320.001)
+        mode = display_mode.DisplayMode(backend)
+        armed = []
+        mode.set_confirm_prompt(lambda seconds: armed.append(seconds))
+        mode.match_for_capture(1920, 1080, 60, "sixty")
+        self.assertEqual(1, len(armed), "the first switch has to ask")
+        mode.confirm_visible()
+        for _ in range(3):
+            mode.match_for_capture(1920, 1080, 60, "sixty")   # the reconnects
+        self.assertEqual(1, len(armed), "a repeat PLAY asked again though nothing was switched")
+
+    def test_a_fresh_install_matches_the_streams_size(self):
+        """The default has to be the one that puts the desktop at the STREAM'S size. Anything else
+        resamples the picture on the way out, and that resampling is what made 1080p through a 1440p
+        desktop look soft. "capture" was the old default and takes the fastest mode instead."""
+        # this module already points the settings at a scratch file, so nothing is stored and the
+        # property has to fall all the way through to its default
+        from teecellstream.server import Server
+        self.assertIsNone(settings.get("display_strategy"))
+        self.assertEqual("sixty", Server.display_strategy.fget(Server.__new__(Server)))
+
+    def test_a_confirmed_mode_survives_the_countdown(self):
+        """The bug behind the frozen picture on the console. The countdown reverts the desktop unless
+        somebody confirms - but whoever is streaming is looking at their TELEVISION and cannot answer a
+        dialog on the PC, so it always ran out. Measured twice in one evening, exactly 15.0 s after the
+        switch: the desktop went back to its own size while the capture stayed at the stream's, so the
+        console sat on a frozen picture while the pad still worked. The console receiving IS the answer."""
+        backend = _FakeBackend(2560, 1440, refresh=320.001)
+        mode = display_mode.DisplayMode(backend)
+        mode.set_confirm_prompt(lambda seconds: None)
+        self.assertTrue(mode.match_to(1920, 1080, 119.8788))
+        self.assertFalse(mode.is_confirmed)
+        mode.confirm_visible()                     # what a pad packet from the console now does
+        self.assertTrue(mode.is_confirmed)
+        self.assertTrue(mode.is_changed, "the mode must still be the stream's after confirming")
+
+    def test_a_nominal_rate_keeps_the_wide_tolerance(self):
+        """The other side of it: when the rate did NOT come from the monitor's list, a screen whose "60" is
+        59.9506 must not be restarted for nothing. That is why the tolerance is the caller's to choose."""
+        backend = _FakeBackend(2560, 1440, refresh=59.9506)
+        mode = display_mode.DisplayMode(backend)
+        self.assertTrue(mode.match_to(2560, 1440, 60.0))          # default tolerance = nominal
+        self.assertNotIn("switch", [c[0] if isinstance(c, tuple) else c for c in backend.calls])
+
+    def test_the_smaller_size_still_beats_the_closer_rate(self):
+        """Sharpness first: a desktop bigger than the stream costs a resampling, and that was worth more
+        than a beat of one repaint every quarter of an hour."""
+        modes = [self._mode(1920, 1080, 119.8788), self._mode(2560, 1440, 119.8800)]
+        width, height, refresh = display_mode.choose_sixty_hz_mode(modes, 1920, 1080, 59.94)
+        self.assertEqual((1920, 1080), (width, height))
+        self.assertAlmostEqual(119.8788, refresh, places=4)
+
+    def test_size_only_keeps_the_streams_size_where_sixty_would_scale(self):
+        """The point of the third strategy: 1280x720 has no whole multiple of 59.94 on this screen, so
+        "sixty" scales from 1920x1080 - while "same size only" stays 1:1 and takes whatever rate the
+        screen has at that size."""
+        modes = [self._mode(1280, 720, 60.0), self._mode(1920, 1080, 119.8788), self._mode(1920, 1080, 240.0)]
+        self.assertEqual((1280, 720), display_mode.choose_size_only_mode(modes, 1280, 720, 59.94)[:2])
+        self.assertEqual((1920, 1080), display_mode.choose_sixty_hz_mode(modes, 1280, 720, 59.94)[:2])
+
+    def test_size_only_takes_the_fastest_rate_at_that_size(self):
+        modes = [self._mode(1920, 1080, 60.0), self._mode(1920, 1080, 240.0), self._mode(2560, 1440, 320.0)]
+        self.assertEqual((1920, 1080, 240.0), display_mode.choose_size_only_mode(modes, 1920, 1080, 59.94))
+
+    def test_size_only_ignores_variable_rate_modes(self):
+        modes = [self._mode(1920, 1080, 240.0, variable=True), self._mode(1920, 1080, 120.0)]
+        self.assertEqual((1920, 1080, 120.0), display_mode.choose_size_only_mode(modes, 1920, 1080, 59.94))
+
+    def test_size_only_asks_anyway_when_the_screen_has_no_such_size(self):
+        modes = [self._mode(2560, 1440, 320.0)]
+        self.assertEqual((1536, 864, 59.94), display_mode.choose_size_only_mode(modes, 1536, 864, 59.94))
+
+    def test_every_strategy_has_a_chooser(self):
+        """The dispatch in match_for_capture falls back to choose_capture_mode for anything it does not
+        know, so a strategy added without a chooser would silently behave like the default."""
+        modes = [self._mode(1920, 1080, 119.8788), self._mode(1920, 1080, 240.0)]
+        picked = {}
+        for strategy in display_mode.DISPLAY_STRATEGIES:
+            if strategy == "off":
+                continue
+            chooser = {"sixty": display_mode.choose_sixty_hz_mode,
+                       "size": display_mode.choose_size_only_mode}.get(strategy, display_mode.choose_capture_mode)
+            picked[strategy] = chooser(modes, 1920, 1080, 59.94)
+        self.assertNotEqual(picked["sixty"], picked["capture"], "sixty must not behave like the default")
+        self.assertEqual(119.8788, picked["sixty"][2])
+        self.assertEqual(240.0, picked["size"][2])
 
     def test_sixty_hz_falls_back_to_the_stream_size_when_no_mode_offers_60(self):
         modes = [self._mode(2560, 1440, 320.001), self._mode(1920, 1080, 144)]
@@ -976,3 +1107,176 @@ class ChooseCaptureModeTests(unittest.TestCase):
         self.assertGreaterEqual(height, 720)
         self.assertTrue(any(m.width == width and m.height == height and abs(m.refresh - refresh) < 0.01 for m in modes))
 
+
+
+class ReconnectStormTests(unittest.TestCase):
+    """A PS3 that cannot cope with the chosen bitrate drops the stream and its app immediately tries again.
+    Before this, every retry restored the desktop mode and switched it forward again - which is what kept
+    blacking the PC's screen out. Two rules are asserted here: a fault keeps the mode for a short window,
+    and three faulty streams in a row stop the server instead of carrying on."""
+
+    def setUp(self):
+        from teecellstream import server as server_module
+        self.server_module = server_module
+
+        class FakeStreamer:
+            is_streaming = True
+            def stop(self): self.is_streaming = False
+
+        class FakeDisplay:
+            """Counts real mode CHANGES, not calls: the real restore() returns at once when the desktop
+            was never switched, and a fake that counted calls would report a black screen that never was."""
+            def __init__(self): self.restores = 0; self.changed = True   # a stream is up, so it is switched
+            def restore(self):
+                if self.changed:
+                    self.restores += 1
+                    self.changed = False
+            def switch(self): self.changed = True
+            @property
+            def is_changed(self): return self.changed
+
+        # a Server built field by field: this documents exactly what the stop path touches, and needs no
+        # socket, no ffmpeg probe and no desktop
+        self.server = server_module.Server.__new__(server_module.Server)
+        server = self.server
+        import threading
+        server.stream_lock = threading.RLock()
+        server.live_streamer = FakeStreamer()
+        server.audio_streamer = None
+        server.pad_receiver = None
+        server.display_mode = FakeDisplay()
+        server.connected_ps3 = "192.0.2.7"
+        server._stream_confirmed = True
+        server._session_started = time.monotonic()
+        server._faulty_sessions = 0
+        server._last_fault = 0.0
+        server._restore_due = None
+        server.is_armed = True
+        server.trip_reason = None
+
+        self.awake = mock.patch.object(server_module, "keep_display_awake", lambda on: None)
+        self.awake.start()
+        self.addCleanup(self.awake.stop)
+
+    def _drop(self, why="nothing from the PS3"):
+        """One stream that came up and ended straight away, however it ended."""
+        self.server.live_streamer.is_streaming = True
+        self.server.connected_ps3 = "192.0.2.7"
+        self.server._session_started = time.monotonic()
+        self.server._restore_due = None
+        self.server.display_mode.switch()      # the PLAY put the desktop into the stream's mode
+        self.server.stop_streaming(why)
+
+    def test_a_fault_keeps_the_display_mode_for_the_retry(self):
+        self._drop()
+        self.assertEqual(0, self.server.display_mode.restores, "the desktop was switched back into the retry")
+        self.assertIsNotNone(self.server._restore_due)
+        self.assertLessEqual(self.server._restore_due - time.monotonic(),
+                             protocol.RECONNECT_KEEP_MODE_SECONDS + 0.5)
+
+    def test_our_own_stop_button_restores_at_once(self):
+        """The Stop button in our own window is the one stop we really do know is a person."""
+        self.server.stop_streaming("stopped by you", user_stop=True)
+        self.assertEqual(1, self.server.display_mode.restores)
+        self.assertIsNone(self.server._restore_due)
+        self.assertTrue(self.server.is_armed)
+        self.assertEqual(0, self.server._faulty_sessions, "a person stopping is never a fault")
+
+    def test_a_stop_packet_from_the_console_still_counts(self):
+        """The bug this class was written for, and the correction that followed it. Measured from the real
+        log: when the console cannot cope with the bitrate its app sends STOP itself and reconnects two
+        seconds later - 32 times in a row. Every one arrived as "the PS3 asked us to stop", counted as
+        intentional, and RESET the counter meant to catch it, while the desktop mode went back and forth
+        each time. Nothing that arrives over the network gets to claim it was a person."""
+        for expected in (1, 2):
+            self._drop("the PS3 asked us to stop")
+            self.assertEqual(expected, self.server._faulty_sessions)
+            self.assertTrue(self.server.is_armed)
+        self._drop("the PS3 asked us to stop")
+        self.assertFalse(self.server.is_armed, "the third STOP in a burst has to stop the server")
+
+    def test_the_storm_does_not_switch_the_desktop_at_all(self):
+        """The blackscreens are the switching, not the disconnect. In a burst the mode has to stay put:
+        the retry arrives inside the hold window and walks straight back into the mode it left."""
+        self._drop("the PS3 asked us to stop")
+        self._drop("the PS3 asked us to stop")
+        self.assertEqual(0, self.server.display_mode.restores,
+                         "the desktop was switched back between two retries - that is the black screen")
+
+    def test_the_logged_storm_replayed(self):
+        """The real thing, from the server's own log of 2026-09-10 16:03. PLAY, STOP about half a second
+        later, the next PLAY two seconds after that - 32 times, and the server never stopped itself while
+        the desktop went 1920x1080 / 2560x1440 / 1920x1080 all the way through. Replayed here on a clock
+        we control: it has to end after three, and the desktop must move once, not once per retry."""
+        clock = [1000.0]
+        with mock.patch.object(self.server_module.time, "monotonic", lambda: clock[0]):
+            self.server._last_fault = clock[0]         # mid-burst, as it would be after the first retry
+
+            cycles = 0
+            for _ in range(32):
+                if not self.server.is_armed:
+                    break
+                cycles += 1
+                if not self.server.live_streamer.is_streaming:
+                    self.server._session_started = clock[0]
+                self.server._restore_due = None        # the PLAY branch clears the pending restore
+                self.server.display_mode.switch()      # match_to is a no-op while it is already switched
+                self.server.live_streamer.is_streaming = True
+                self.server.connected_ps3 = "192.0.2.7"
+                clock[0] += 0.55                       # the STOP packet, half a second in
+                self.server.stop_streaming("the PS3 asked us to stop")
+                clock[0] += 1.45                       # the next PLAY, two seconds after the last one
+        self.assertEqual(protocol.FAULTY_SESSIONS_BEFORE_GIVING_UP, cycles,
+                         "the storm has to end at the limit, not run its 32 rounds")
+        self.assertFalse(self.server.is_armed)
+        self.assertLessEqual(self.server.display_mode.restores, 1,
+                             "the desktop must not be handed back and forth once per retry")
+
+    def test_the_consoles_triple_stop_is_one_session_not_three(self):
+        """Straight out of the log: three "the PS3 asked us to stop" in the SAME millisecond - the console
+        sends its STOP three times over so one lost datagram cannot strand the server. Only the first has a
+        session to end. The other two must not count again, and above all must not cancel the hold the
+        first one just put on the display: that is what put the black screen back into every retry."""
+        self._drop("the PS3 asked us to stop")
+        held_after_first = self.server._restore_due
+        for _ in range(2):
+            self.server.stop_streaming("the PS3 asked us to stop")
+        self.assertEqual(1, self.server._faulty_sessions, "the repeats counted as sessions of their own")
+        self.assertEqual(held_after_first, self.server._restore_due, "a repeat cancelled the display hold")
+        self.assertEqual(0, self.server.display_mode.restores, "a repeat switched the desktop back")
+
+    def test_two_short_sessions_far_apart_are_not_a_storm(self):
+        """Somebody starting and quitting the app twice in an evening must never trip the limit."""
+        self._drop("the PS3 asked us to stop")
+        self.server._last_fault = time.monotonic() - protocol.STORM_WINDOW_SECONDS - 1
+        self._drop("the PS3 asked us to stop")
+        self.assertEqual(1, self.server._faulty_sessions, "the count has to start over after a long gap")
+        self.assertTrue(self.server.is_armed)
+
+    def test_three_faults_in_a_row_stop_the_server(self):
+        for _ in range(protocol.FAULTY_SESSIONS_BEFORE_GIVING_UP - 1):
+            self._drop()
+            self.assertTrue(self.server.is_armed)
+        self._drop()
+        self.assertFalse(self.server.is_armed, "the third failed stream has to stop the server")
+        self.assertIn("3", self.server.trip_reason or "")
+        self.assertGreaterEqual(self.server.display_mode.restores, 1, "giving up must put the desktop back")
+
+    def test_a_stream_that_held_forgives_the_earlier_faults(self):
+        self._drop()
+        self._drop()
+        self.server.live_streamer.is_streaming = True
+        self.server.connected_ps3 = "192.0.2.7"
+        self.server._session_started = time.monotonic() - protocol.SHORT_SESSION_SECONDS - 1
+        self.server.stop_streaming("nothing from the PS3")
+        self.assertEqual(0, self.server._faulty_sessions)
+        self._drop()
+        self.assertTrue(self.server.is_armed, "the counter has to start over after a stream that held")
+
+    def test_our_own_stop_button_also_clears_the_counter(self):
+        self._drop()
+        self._drop()
+        self.server.live_streamer.is_streaming = True
+        self.server.connected_ps3 = "192.0.2.7"
+        self.server.stop_streaming("stopped by you", user_stop=True)
+        self.assertEqual(0, self.server._faulty_sessions)

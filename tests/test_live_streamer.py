@@ -916,6 +916,7 @@ class AnnouncedLevel(unittest.TestCase):
     def test_sinfo_carries_the_level_that_belongs_to_its_own_size(self):
         streamer = LiveStreamer.__new__(LiveStreamer)
         streamer._sinfo_level, streamer._fps = protocol.SINFO_LEVEL, 60
+        streamer._stream_fps = None          # _level_for asks _current_fps for the rate it announces
         self.assertEqual(42, streamer._level_for(1920, 1088))
         self.assertEqual(51, streamer._level_for(2560, 1440))
 

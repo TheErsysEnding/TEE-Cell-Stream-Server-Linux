@@ -1,4 +1,4 @@
-# TEE Cell Stream Server Linux — Anleitung
+# TEE PS3 Remoteplay — PC-Spiele auf der PS3, Anleitung
 
 *English documentation: [README.md](README.md)*
 
@@ -25,12 +25,38 @@ Full HD bei 60 fps braucht **x264** statt NVENC: `--preset ultrafast` schaltet d
 und der ist der teuerste Teil der H.264-Decodierung. Mit NVENC kostet dasselbe Bild 147 ms statt 38–44 ms.
 Details im englischen [README.md](README.md).
 
+### Es läuft noch nicht vollkommen flüssig — bei keiner Auflösung
+
+Die Tabelle heißt: es kommen 60 Bilder pro Sekunde an, und keines geht verloren. Das stimmt und ist
+gemessen. Es heißt **nicht**, dass jedes Bild genau eine Bildwiederholung lang steht — und das ist der
+Teil, der noch nicht fertig ist. Rechne mit gelegentlichem Haken. Die meisten würden es „flüssig mit ab
+und zu einem Ruckler" nennen, nicht „festgenagelte 60".
+
+Woher es kommt, soweit gemessen:
+
+- **Was den PC verlässt, ist nahezu perfekt.** Eine 87-Sekunden-Aufnahme in Full HD auf der Konsole
+  enthält 5257 Bilder: Abstand im Mittel 16,64 ms gegen ideale 16,68, Streuung 1,39 ms, und **kein
+  einziger** Abstand über 33 ms — es wurde also nie ein Platz ausgelassen.
+- **Die Konsole hat keine Bildtaktung.** Ihre App zeigt ein Bild, sobald es decodiert ist; es gibt keine
+  Warteschlange und keine Uhr. Ihr Videoausgang läuft mit 59,94 Hz. Jeder Unterschied zwischen der
+  Ankunftsrate und diesen 59,94 muss sich früher oder später als doppelt gezeigtes Bild bemerkbar machen.
+- **Dieser Unterschied ist klein, aber echt.** Mit 59,94 fps zu senden und den Desktop auf ein ganzes
+  Vielfaches davon zu stellen (die Vorgabe) macht ihn klein. Es macht ihn nicht null.
+
+Zwei Dinge, die man vorher wissen sollte: **59,94 fps ist die richtige Wahl**, nicht 60 — das ist die Rate
+der Konsole selbst, jede andere schwebt dagegen. Und ein Monitor, der bei der Streamgröße kein ganzes
+Vielfaches von 59,94 kann, wird von einer größeren herunterskaliert; das kostet Schärfe, nicht Flüssigkeit.
+
+Die verbleibende Arbeit liegt auf der Konsolenseite: die Ausgabe an ihren eigenen Bildrücklauf koppeln,
+statt jedes Bild sofort nach dem Decodieren zu zeigen. Das ist der nächste Schritt und in dieser Fassung
+noch nicht drin.
+
 ![Das Fenster](docs/fenster-server.png)
 
 ## Installation (1 Klick)
 
 ```
-sudo apt install ./tee-cell-stream-server_1.23.0_all.deb
+sudo apt install ./tee-cell-stream-server_1.0.0_all.deb
 ```
 
 Alles Nötige (ffmpeg mit NVENC, GStreamer/PipeWire, GTK4/libadwaita, evdev, Portal) kommt aus den
@@ -39,7 +65,7 @@ Ubuntu-Paketquellen. Das Paket richtet außerdem ein:
 - `/dev/uinput`-Zugriff für den angemeldeten Benutzer (udev-Regel, wie bei Steam) → virtuelles Gamepad
 - bei aktiver `ufw`-Firewall die Freigabe von **UDP 38310** (die PS3 spricht den Server darauf an)
 
-Auf der PS3 (HEN/CFW): `TEE-Remote-Play-v1.0.pkg` aus dem Release installieren.
+Auf der PS3 (HEN/CFW): `TEE-Remote-Play-v1.0.0.pkg` aus dem Release installieren.
 
 ## Benutzung
 

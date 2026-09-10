@@ -43,7 +43,6 @@ METHOD_PERSISTENT = 2
 LAYOUT_MODE_LOGICAL = 1
 LAYOUT_MODE_PHYSICAL = 2
 
-REFRESH_TOLERANCE_HZ = 0.2      # '1280x720@59.943' or '@60.000' both count as the 60 we stream at
 STATE_TIMEOUT_MS = 5000
 APPLY_TIMEOUT_MS = 20000        # a mode switch takes a moment (monitor re-sync); mutter answers after it
 XRANDR_TIMEOUT_S = 20
@@ -205,33 +204,98 @@ PREFERRED_DESKTOP_SIZES = ((1280, 720), (1920, 1080), (2560, 1440))
 # is no beat left at all - the compositor and the grid share one clock - but the same measurement that gave
 # us CAPTURE_REFRESH_FACTOR says the cast then hands out only two thirds of them. Evenly spaced 40 against
 # unevenly spaced 58: which of those an eye prefers is not something to reason about, so it is a switch.
-DISPLAY_STRATEGIES = ("off", "capture", "sixty")
+DISPLAY_STRATEGIES = ("off", "capture", "sixty", "size")
 
 # Monitors report 59.9506 for what everyone calls 60, and 320.00146 for 320. A rate is "the same" within
-# this much - wide enough for that, narrow enough to tell 60 from 120.
+# this much - wide enough for that, narrow enough to tell 60 from 120. Used when a rate is matched against
+# a NAME ("the 60 Hz mode"), where a tenth of a Hz never mattered.
+# (This used to be declared twice, 0.2 near the top and 1.0 here; the second one shadowed the first for
+# every call, so 0.2 never applied to anything. Only this one is left.)
 REFRESH_TOLERANCE_HZ = 1.0
+
+# ...but "is the desktop ALREADY at the exact mode we picked out of its own list" is a different question,
+# and it needs a much tighter answer. This screen has 1920x1080 at 119.8788 Hz AND at 119.9302 Hz, 0.05 Hz
+# apart, and only one of them is exactly 2 x 59.94 - telling those two apart is the whole point of
+# choose_sixty_hz_mode. At 1.0 Hz a desktop sitting on the wrong one reported "already there" and was never
+# switched, which quietly cancelled that choice.
+# This is only used when the rate came from the monitor's own mode list, so it need only absorb the
+# rounding in what mutter reports (four decimals). A merely NOMINAL 60 keeps the wide tolerance: a screen
+# whose "60" is 59.9506 must not be restarted for nothing.
+SAME_RATE_TOLERANCE_HZ = 0.02
 
 CONFIRM_SECONDS = 15
 
 
-def choose_sixty_hz_mode(modes: list, stream_width: int, stream_height: int, fps: int) -> tuple:
+def choose_sixty_hz_mode(modes: list, stream_width: int, stream_height: int, fps: float) -> tuple:
     """(width, height, refresh) for the "no beat" strategy: an ordinary size at the stream's own frame rate.
 
     Everything shares one clock this way - the game, the compositor, our grid and the console - so no picture
     can be superseded before its slot and none can be held past it. What it costs is what
     CAPTURE_REFRESH_FACTOR was written for; whether that trade is worth it is what the switch is for."""
-    exact = [mode for mode in modes
-             if mode.width >= stream_width and mode.height >= stream_height
-             and abs(mode.refresh - fps) <= 1.0 and not mode.is_variable_rate]
-    if not exact:
+    # An integer MULTIPLE of the frame rate is just as beat-free as the rate itself - at 2x every
+    # second repaint is a slot - and it is what makes this strategy usable at all. Measured on a
+    # 320 Hz monitor: the desktop at 1x (59.939 Hz) had the source delivering only 33 pictures a
+    # second, because GNOME's ScreenCast hands out roughly every other repaint. At 2x (119.879 Hz)
+    # the same shortfall still leaves a full 60. So multiples from 2 up are preferred, and 1x is the
+    # fallback for a monitor that has nothing faster.
+    #
+    # The 0.5 Hz tolerance is absolute on purpose, because the leftover IS the beat frequency: a mode
+    # 0.5 Hz off its multiple walks the phase through one whole repaint every two seconds, and one
+    # 0.24 Hz off (240.000 Hz against 4 x 59.94 = 239.76) every four. Both are far better than the
+    # 60 Hz beat of an unmatched desktop, and a tighter bound would reject useful modes.
+    def multiple_of(refresh: float) -> int:
+        for n in (2, 3, 4, 1):
+            if abs(refresh - fps * n) <= 0.5:
+                return n
+        return 0
+
+    # Two modes of the same size can BOTH pass that tolerance: this monitor offers 1920x1080 at 119.8788 Hz
+    # and at 119.9302 Hz, and only the first is exactly 2 x 59.94. Whatever is left over is the beat, so among
+    # equals the smallest leftover has to win - 0.0012 Hz off walks the phase through one repaint every 14
+    # minutes, 0.05 Hz off every 20 seconds, and the 20 seconds are what is still felt as the odd hitch.
+    def phase_error(mode) -> float:
+        return abs(mode.refresh - fps * multiple_of(mode.refresh))
+
+    usable = [mode for mode in modes
+              if mode.width >= stream_width and mode.height >= stream_height
+              and multiple_of(mode.refresh) and not mode.is_variable_rate]
+    if not usable:
         return stream_width, stream_height, float(fps)
+    # smallest multiple at or above 2 wins; 1x only when the screen offers nothing else
+    best_multiple = min((multiple_of(mode.refresh) for mode in usable),
+                        key=lambda n: (n < 2, n))
+    exact = [mode for mode in usable if multiple_of(mode.refresh) == best_multiple]
     for width, height in PREFERRED_DESKTOP_SIZES:
         if width * height < stream_width * stream_height:
             continue
         fits = [mode for mode in exact if (mode.width, mode.height) == (width, height)]
         if fits:
-            return fits[0].width, fits[0].height, fits[0].refresh
-    best = min(exact, key=lambda mode: mode.width * mode.height)
+            closest = min(fits, key=phase_error)
+            return closest.width, closest.height, closest.refresh
+    # size still comes first - a desktop bigger than the stream costs a resampling, which costs sharpness
+    best = min(exact, key=lambda mode: (mode.width * mode.height, phase_error(mode)))
+    return best.width, best.height, best.refresh
+
+
+def choose_size_only_mode(modes: list, stream_width: int, stream_height: int, fps: float) -> tuple:
+    """(width, height, refresh) for "the stream's own size, whatever rate the screen does best".
+
+    This takes half of what "sixty" does and leaves the other half alone. The half it keeps is the one
+    that was measured to matter most: with the desktop at exactly the stream's size nothing is resampled
+    on the way to the console, and that is what turned a soft picture sharp. The half it drops is the
+    rate - so the screen may run as fast as it likes, and the compositor has all the repaints it wants
+    instead of the bare two per picture that a locked multiple leaves it.
+
+    What it gives up is the phase lock: the desktop's rate is then whatever the monitor's fastest mode at
+    that size happens to be, and it need not be a whole multiple of the frame rate. Whether the sharpness
+    without the lock beats the lock is exactly what this setting is for finding out."""
+    same = [mode for mode in modes
+            if mode.width == stream_width and mode.height == stream_height and not mode.is_variable_rate]
+    if not same:
+        # the screen has no mode at this size at all: ask for it anyway, as the other strategies do -
+        # the backend either finds something or reports back and the stream is scaled as before
+        return stream_width, stream_height, float(fps)
+    best = max(same, key=lambda mode: mode.refresh)
     return best.width, best.height, best.refresh
 
 
@@ -681,14 +745,16 @@ class DisplayMode:
         except Exception as error:   # noqa: BLE001 - a backend that cannot enumerate just gets the old behaviour
             log.write(_("display: could not read the modes (%s)") % error)
             modes = []
-        chooser = choose_sixty_hz_mode if strategy == "sixty" else choose_capture_mode
+        chooser = {"sixty": choose_sixty_hz_mode, "size": choose_size_only_mode}.get(strategy, choose_capture_mode)
         width, height, refresh = chooser(modes, stream_width, stream_height, fps)
         # only say it once per target: a repeated PLAY comes through here again, and the old wording
         # promised a switch even when the desktop was already sitting on the chosen mode
         announce = modes and self._last_announced != (stream_width, stream_height, width, height)
         self._last_announced = (stream_width, stream_height, width, height)
         was_changed = self._changed
-        switched = self.match_to(width, height, refresh)
+        # `modes` non-empty means `refresh` is one of the monitor's own rates, not a nominal number
+        switched = self.match_to(width, height, refresh,
+                                 SAME_RATE_TOLERANCE_HZ if modes else REFRESH_TOLERANCE_HZ)
         if announce:
             if self._changed and not was_changed:
                 pass            # match_to logged the switch itself, with the sizes it really used
@@ -697,13 +763,22 @@ class DisplayMode:
             else:
                 log.write("display: streaming %dx%d, wanted the desktop at %dx%d@%g - could not, "
                           "scaling instead" % (stream_width, stream_height, width, height, refresh))
-        if switched:
+        # only a switch that really just happened gets a countdown. match_to returns True without doing
+        # anything while the desktop is already on the mode, and the PS3 re-sends PLAY on every reconnect -
+        # so this used to arm again on each one, which cleared a confirmation the user had already given and
+        # put a second dialog on top of the first. Visible in the log as two "picture confirmed" lines less
+        # than a second apart.
+        if switched and self._changed and not was_changed:
             self.arm_confirmation()
         return switched
 
-    def match_to(self, width: int, height: int, refresh_hz: float) -> bool:
+    def match_to(self, width: int, height: int, refresh_hz: float,
+                 rate_tolerance: float = REFRESH_TOLERANCE_HZ) -> bool:
         """True if the desktop is now at this size (or already was). False means we left it alone and the stream
-        will be scaled down as before - a worse picture, but nothing is broken."""
+        will be scaled down as before - a worse picture, but nothing is broken.
+
+        rate_tolerance decides how close the current rate has to be to count as "already there"; the caller
+        knows whether it is asking for an exact mode or a nominal rate. See SAME_RATE_TOLERANCE_HZ."""
         with self._gate:
             if self._changed:
                 return True
@@ -720,7 +795,7 @@ class DisplayMode:
             # instead of 320 - and a size-only test reported "already there" and switched nothing at all.
             # A backend that cannot report a rate sends 0 and keeps the old size-only behaviour.
             same_size = snapshot.width == width and snapshot.height == height
-            same_rate = not snapshot.refresh or abs(snapshot.refresh - refresh_hz) <= REFRESH_TOLERANCE_HZ
+            same_rate = not snapshot.refresh or abs(snapshot.refresh - refresh_hz) <= rate_tolerance
             if same_size and same_rate:
                 return True   # already there
 
@@ -744,8 +819,13 @@ class DisplayMode:
         It is called from a worker thread and must return at once - the GUI schedules its own dialog."""
         self._confirm_prompt = prompt
 
+    @property
+    def is_confirmed(self) -> bool:
+        """True once the countdown has been answered or called off - see arm_confirmation."""
+        return self._confirmed.is_set()
+
     def confirm_visible(self) -> None:
-        """The user answered yes: keep the mode."""
+        """The mode is good: keep it. Answered by the user, or by the console proving it receives."""
         self._confirmed.set()
 
     def reject_visible(self) -> None:

@@ -4,6 +4,8 @@ Everything the PS3 relies on lives here so no module can drift from another. Do 
 without changing the PS3 app.
 """
 
+from fractions import Fraction
+
 # UDP ports: the server listens on SERVER_PORT, the PS3 binds CLIENT_PORT and receives the beacon there
 SERVER_PORT = 38310
 BEACON_PORT = 38311
@@ -38,9 +40,74 @@ BEACON_REFRESH_TARGETS_S = 30
 # 2560x1440 and 3840x2160 never connected at all - no picture, no error, the PS3 simply refused. That is
 # exactly where H.264 level 4.2 stops (8704 macroblocks per picture); 1920x1088 needs 8160 and fits, and
 # 2048x1152 needs 9216 and does not. cellVdec evidently will not go past 4.2, so the sizes above are gone.
-STREAM_SIZES = ((1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1088))
-WIDTH, HEIGHT = STREAM_SIZES[0]
+# 1920x1080, not 1088: H.264 codes whole 16x16 blocks, so the encoder pads to 1088 rows by itself
+# and marks the extra eight as not-for-display. Asking the capture for 1088 instead meant resampling
+# every row of a 1080 desktop to fit - a small stretch, but softer text on every single frame. The
+# PS3 app reads the SPS cropping since v1.0.8 and shows the 1080 the encoder meant.
+STREAM_SIZES = ((960, 544), (1280, 720), (1408, 800), (1536, 864), (1792, 1008), (1920, 1080))
+
+# The default is named rather than taken as STREAM_SIZES[0]: 960x544 was added below 720p as a
+# high-frame-rate probe, and letting it become everyone's default by position would have been a
+# silent downgrade for anyone who never picked a size.
+DEFAULT_SIZE = (1280, 720)
+WIDTH, HEIGHT = DEFAULT_SIZE
 FPS = 60
+
+# Selectable frame rates. What the PS3 shows is 59.94 Hz (the SDK has no 60 Hz mode for 1080p or
+# 720p, and an application may not choose it), so none of these divides the display rate exactly and
+# a slow drift is unavoidable. What DOES differ is how evenly the pictures land on refreshes:
+#
+#   60 -> ~1 refresh per picture, even
+#   55 -> mostly 1, but every ~11th picture stays up for two: a slight, regular hitch
+#   50 -> every 5th picture stays up for two: the same hitch, five times a second
+#   30 -> ~2 refreshes per picture, even again
+#
+# So 30 and 60 are the smooth ones and 50/55 trade smoothness for headroom. They are offered anyway
+# because the headroom is real - at 30 fps the console gets 33.3 ms per picture instead of 16.7 -
+# and because on a marginal setup a regular hitch can still beat a dropped frame.
+#
+# 59.94 is the television's own rate and therefore the one that lands exactly. 59.95 sits a hair above
+# it and is there to be TRIED, not assumed: the nominal 59.94 is what the SDK promises, and a
+# particular console and television need not run at exactly that. If they run a touch fast, 59.95 is
+# the closer match; if they do not, it beats against 59.94 about once every hundred seconds. It is a
+# measurement, and the session log on the console is what settles it.
+FPS_CHOICES = (30, 50, 55, 59.94, 59.95, 60, 90, 120, 145, 240)
+
+
+def fps_fraction(fps: float) -> tuple[int, int]:
+    """The frame rate as the exact fraction ffmpeg and GStreamer want.
+
+    59.94 is not 59.94: the television rate is 60000/1001 = 59.940059940..., and writing "59.94"
+    instead would be 5994/100, off by 1e-4 - a frame every ten hours. Free to get right, so it is
+    got right.
+
+    Everything else becomes its own exact fraction rather than being rounded to a whole number. This
+    used to round, with a 0.01 band around the television rate to catch 59.94 - and 59.95 falls inside
+    that band, by 0.0001. Asking for 59.95 would have silently sent 59.94, which is exactly the
+    difference the rate exists to measure. A rate now only counts as the television's when it is one."""
+    if abs(fps - 60000.0 / 1001.0) < 0.001:
+        return (60000, 1001)
+    exact = Fraction(fps).limit_denominator(1000)
+    return (exact.numerator, exact.denominator)
+
+
+def max_fps_for_level42(width: int, height: int) -> int:
+    """How many pictures a second H.264 level 4.2 allows at this size: 522240 macroblocks per second
+    (Annex A), so 64 fps at 1920x1088 and 145 at 1280x720.
+
+    This is the console's real ceiling, not a guideline. cellVdec will not open a stream above level
+    4.2 - the same limit that makes 1920x1088 the largest size this project offers - so asking for a
+    higher rate at a large size would produce a stream the PS3 refuses outright. The rate is capped
+    instead of the level raised.
+
+    Returns 0 when the PICTURE itself is already past 4.2 (more than 8704 macroblocks). No frame rate
+    makes such a size decodable, so there is nothing to cap and the caller should leave the
+    announcement alone."""
+    macroblocks = ((width + 15) // 16) * ((height + 15) // 16)
+    if macroblocks > 8704:
+        return 0
+    return max(1, 522240 // macroblocks)
+
 # 12 Mbit/s rather than the 6 this shipped with: with CAVLC, the deblocking filter off and the HRD timing
 # parameters in place, the console no longer cares much about the rate - measured 38-42 ms decode at
 # 12 Mbit/s against 40-45 at 35 at 1792x1008 - so the old caution bought nothing and cost sharpness.
@@ -163,10 +230,69 @@ AUDIO_ADTS_HEADER_BYTES = 7           # stripped before sending: the muxer wants
 # controller (CP): 20 bytes, PS3 -> server, 60/s
 PAD_PACKET_BYTES = 20
 
+# ------------------------------------------------------------------ real USB keyboard and mouse
+# "HID " + one report, PS3 -> server, sent while the console is in USB-input mode. It carries the whole
+# input state rather than events, exactly as a USB report does: which modifiers are down, which keys are
+# down, and how far the mouse moved since the last one. State, not events, so a lost packet costs one
+# frame of movement and never leaves a key stuck down.
+#
+# The key codes are RAW HID usages - positions on the keyboard, not characters. See hid_keys.py for why
+# that is the only way the PC's own keyboard layout can decide what gets typed.
+HID_MAGIC = b"HID "
+HID_MAX_KEYS = 6              # what a boot-protocol keyboard reports; more than anyone presses at once
+HID_HEADER_BYTES = 12         # magic(4) modifiers(1) keys(1) buttons(1) wheel(1) dx(2) dy(2)
+HID_PACKET_MAX = HID_HEADER_BYTES + 2 * HID_MAX_KEYS
+
+HID_BTN_LEFT, HID_BTN_RIGHT, HID_BTN_MIDDLE = 1 << 0, 1 << 1, 1 << 2
+
+
+def parse_hid_packet(packet: bytes):
+    """(modifiers, keys, buttons, dx, dy, wheel) or None when this is not a usable HID report.
+
+    Everything is bounds-checked: this arrives over UDP from outside, and a short or oversized packet
+    must cost nothing more than being ignored.
+    """
+    if not packet.startswith(HID_MAGIC) or len(packet) < HID_HEADER_BYTES:
+        return None
+    modifiers = packet[4]
+    count = packet[5]
+    buttons = packet[6]
+    wheel = packet[7] - 256 if packet[7] > 127 else packet[7]        # int8
+    dx = int.from_bytes(packet[8:10], "big", signed=True)            # the PS3 is big-endian
+    dy = int.from_bytes(packet[10:12], "big", signed=True)
+    if count > HID_MAX_KEYS or len(packet) < HID_HEADER_BYTES + 2 * count:
+        return None
+    keys = tuple(int.from_bytes(packet[HID_HEADER_BYTES + 2 * i:HID_HEADER_BYTES + 2 * i + 2], "big")
+                 for i in range(count))
+    return modifiers, keys, buttons, dx, dy, wheel
+
+
+def build_hid_packet(modifiers: int, keys, buttons: int, dx: int, dy: int, wheel: int) -> bytes:
+    """The same report the other way round - the tests send it, and it documents the layout."""
+    keys = tuple(keys)[:HID_MAX_KEYS]
+    return (HID_MAGIC
+            + bytes([modifiers & 0xFF, len(keys), buttons & 0xFF, wheel & 0xFF])
+            + int(dx).to_bytes(2, "big", signed=True)
+            + int(dy).to_bytes(2, "big", signed=True)
+            + b"".join(int(code).to_bytes(2, "big") for code in keys))
+
 # liveness: the pad packet doubles as proof the PS3 is still there
 CLIENT_TIMEOUT_MS = 3000
 STREAM_STARTUP_GRACE_MS = 10000
 WATCHDOG_TICK_MS = 500
+
+# giving up on a stream that will not hold. A PS3 that cannot cope with the chosen bitrate drops the
+# connection and its app immediately tries again - and every retry switched the desktop mode and back,
+# which is what turns a bad setting into a screen that keeps going black. So: a stream that dies by
+# itself this often in a row stops the server instead, and the mode is kept across a quick reconnect.
+FAULTY_SESSIONS_BEFORE_GIVING_UP = 3
+SHORT_SESSION_SECONDS = 20.0        # anything shorter than this never really got going
+RECONNECT_KEEP_MODE_SECONDS = 6.0   # a PLAY within this window reuses the mode instead of switching again
+# Short sessions only add up while they come in a burst. Measured from a real storm: PLAY, STOP about
+# half a second later, the next PLAY two seconds after that, over and over. Somebody who simply starts
+# and quits the app on the console a few times in an evening must never trip the limit, so a gap this
+# long between two teardowns starts the count over.
+STORM_WINDOW_SECONDS = 60.0
 
 # encoder tuning (see upstream/server/LiveStreamer.cs for the measurements behind these)
 REFRESH_SWEEP_SECONDS = 1

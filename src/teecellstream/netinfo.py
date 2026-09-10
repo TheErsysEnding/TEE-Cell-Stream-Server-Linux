@@ -2,7 +2,7 @@
 
 The machine can have several network adapters (libvirt and VirtualBox add virtual ones), and a plain
 255.255.255.255 broadcast only leaves through ONE of them - often the wrong one. So the beacon goes to
-every adapter's own broadcast address (e.g. 10.42.0.255) plus the global one.
+every adapter's own broadcast address (e.g. 192.0.2.255) plus the global one.
 """
 
 import ipaddress

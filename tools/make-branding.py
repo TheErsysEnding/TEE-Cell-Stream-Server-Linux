@@ -60,7 +60,11 @@ HEAVY = "/usr/share/fonts/opentype/montserrat/Montserrat-ExtraBold.otf"
 MEDIUM = "/usr/share/fonts/opentype/montserrat/Montserrat-SemiBold.otf"
 
 LINK = "linktr.ee/theersysending"
-VERSION_LABEL = "V0.1 BETA"
+VERSION_LABEL = "V1.0"
+# What the release is actually about, and the one thing worth claiming on a tile seen from a sofa.
+# Short form on the 320 px tile, full form on the background where there is room for it.
+CAPABILITY = "FULL HD 60 FPS"
+CAPABILITY_LONG = "FULL HD 60 FPS SUPPORT"
 PITCH = "STREAM PC GAMES ON PLAYSTATION 3"       # tile, all caps
 PITCH_LONG = "Stream PC games on PlayStation 3"  # background, mixed case
 
@@ -434,8 +438,16 @@ def make_icon():
 
     # Right-aligned to the same measure so the block closes cleanly, and far enough above the
     # bottom edge to stay out of the XMB title's way.
-    legible.append(("version", right_text(d, TX + MEASURE, 143, VERSION_LABEL, font(MEDIUM, 13),
+    # The shelf carries two labels: what it can do on the left, which build it is on the right. They
+    # share one baseline so the block still closes cleanly against the measure.
+    shelf = font(MEDIUM, 13)
+    legible.append(("capability", ink_text(d, TX, 143, CAPABILITY, shelf, DIM, tracking=1.0)))
+    legible.append(("version", right_text(d, TX + MEASURE, 143, VERSION_LABEL, shelf,
                                           DIM, tracking=1.8)))
+    # ...but only if they really do fit side by side; overlapping them would be worse than either
+    cap_w = tracked_width(d, CAPABILITY, shelf, 1.0)
+    ver_w = tracked_width(d, VERSION_LABEL, shelf, 1.8)
+    assert cap_w + ver_w + 12 <= MEASURE, "tile shelf: %d + %d does not fit in %d" % (cap_w, ver_w, MEASURE)
 
     # The tile's own corners get clipped too - the concept applied to the frame itself. Cut with
     # near-black rather than transparency because the XMB composites the tile over its own
@@ -506,8 +518,10 @@ def make_background():
     # 26, not 30: at 30 this line runs 77 px past the block's right edge and the driven-out
     # measure stops reading as a block at all.
     legible.append(("strapline", ink_text(d, TX, 362, PITCH_LONG, font(MEDIUM, 26), STEEL)))
-    legible.append(("version", right_text(d, TX + MEASURE, 408, VERSION_LABEL,
-                                          font(MEDIUM, 24), DIM, tracking=3.0)))
+    shelf = font(MEDIUM, 24)
+    legible.append(("capability", ink_text(d, TX, 408, CAPABILITY_LONG, shelf, DIM, tracking=1.5)))
+    legible.append(("version", right_text(d, TX + MEASURE, 408, VERSION_LABEL, shelf,
+                                          DIM, tracking=3.0)))
 
     print("  PIC1  primary block")
     check("lockup", legible, PRIMARY, FORBIDDEN)

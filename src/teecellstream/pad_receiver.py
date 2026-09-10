@@ -1,6 +1,6 @@
 """Receives the PS3's controller and replays it on the PC (port of PadReceiver.cs).
 
-Either as a virtual Xbox gamepad (for games) or as the mouse and keyboard (for the desktop); the PS3
+Either as a virtual Xbox gamepad (for games) or as the pointer and keyboard (for the desktop); the PS3
 picks which with a PADMODE message. The gamepad needs a writable /dev/uinput (the package's udev rule
 grants it), and we fall back to the mouse without it.
 
@@ -58,7 +58,17 @@ class PadReceiver:
                 return
             self._release_locked()   # let go of whatever the device we are leaving was holding down
             self.gamepad_mode = wanted
-            log.write(_("pad: now driving ") + (_("a virtual Xbox gamepad") if wanted else _("mouse and keyboard")))
+            log.write(_("pad: now driving ") + (_("a virtual Xbox gamepad") if wanted else _("the pointer and keyboard")))
+
+    # one report from a real USB keyboard and mouse plugged into the console
+    def apply_hid(self, modifiers: int, keys, buttons: int, dx: int, dy: int, wheel: int) -> None:
+        with self._gate:
+            if self._closed:
+                return
+            try:
+                self._desktop.apply_hid(modifiers, keys, buttons, dx, dy, wheel)
+            except Exception as error:   # noqa: BLE001
+                self._log_fault(error)
 
     # a key typed on the PS3's on-screen keyboard, replayed on the PC keyboard
     def type_key(self, character: str) -> None:

@@ -36,6 +36,9 @@ add_translations({
         "Die PS3 decodiert CAVLC rund 43 % schneller – gemessen 22 ms statt 36–40 ms bei 720p",
     "CABAC is slightly sharper per bit, but costs the PS3 considerably more decode time":
         "CABAC ist etwas schärfer pro Bit, kostet die PS3 aber deutlich mehr Decodezeit",
+    "The lightest picture – the most decode time left over, at the cost of readable text":
+        "Das leichteste Bild – es bleibt die meiste Decodezeit übrig, dafür wird Text unschärfer",
+    " (a hair above – try it if the console runs fast)": " (einen Hauch darüber – testen, falls die Konsole schneller läuft)",
     "A good place to start – measured 22 ms decode on the PS3":
         "Empfohlen für den Einstieg – gemessen 22 ms Decode auf der PS3",
     "A little sharper, about 1.2× the decode load": "Etwas schärfer, rund 1,2× Decodelast",
@@ -43,15 +46,21 @@ add_translations({
     "About 2× the decode load – a good middle ground": "Rund 2× Decodelast – ein guter Mittelweg",
     "Full HD, about 2.3× the decode load – measured 38–44 ms with x264":
         "Volles HD, rund 2,3× Decodelast – gemessen 38–44 ms mit x264",
+    "the pointer and keyboard": "Zeiger und Tastatur",
+    "pad: unknown key from the console's keyboard (HID 0x%02X)":
+        "Pad: unbekannte Taste von der Tastatur an der Konsole (HID 0x%02X)",
     "Leave it alone": "Nicht umschalten",
     "Optimise for capture": "Für die Aufnahme optimieren",
-    "Throttle to 60 Hz": "Auf 60 Hz drosseln",
+    "Same size & refresh rate": "Gleiche Größe & Bildwiederholrate",
+    "Same size only": "Nur gleiche Größe",
     "The desktop stays as it is – the stream is scaled down from its native mode":
         "Der Desktop bleibt, wie er ist – gestreamt wird vom nativen Modus herunterskaliert",
-    "Default: the highest refresh rate the capture can use – the most pictures":
-        "Standard: höchste Bildwiederholrate, die die Aufnahme nutzen kann – die meisten Bilder",
-    "Experiment: monitor at 60 Hz, so game, desktop and stream share one cadence":
-        "Versuch: Monitor auf 60 Hz, damit Spiel, Desktop und Stream denselben Takt haben",
+    "The highest refresh rate the capture can use – the most pictures, but the stream is resized":
+        "Höchste Bildwiederholrate, die die Aufnahme nutzen kann – die meisten Bilder, aber der Stream wird umgerechnet",
+    "Default: the stream's size at a whole multiple of its rate – nothing resampled, nothing beating":
+        "Standard: Größe des Streams, Rate ein ganzes Vielfaches davon – nichts wird umgerechnet, nichts schwebt",
+    "The stream's size at the fastest rate the screen has for it – sharp, but not locked in step":
+        "Größe des Streams, dazu die schnellste Rate, die der Bildschirm dafür hat – scharf, aber nicht im Takt",
     "1 (default)": "1 (Standard)",
     "One picture in one piece – how everything so far was measured":
         "Ein Bild am Stück – so wurde alles bisher gemessen",
@@ -164,6 +173,31 @@ add_translations({
 })
 
 
+def fps_labels() -> tuple[str, ...]:
+    """Built on demand like bitrate_labels: the bracketed words are translated."""
+    smooth = _(" (even)")
+    hitch = _(" (slight hitch)")
+    exact = _(" (matches the TV exactly)")
+    probe = _(" (needs a smaller picture – measures the decoder)")
+    trial = _(" (a hair above – try it if the console runs fast)")
+
+    def note(f: float) -> str:
+        # 59.94 is the television's own rate, so every picture lands on exactly one refresh: no
+        # duplicate, no dropped one. Above 60 nothing more can be SHOWN at all - the extra pictures
+        # are decoded and then overwritten before the beam reaches them - so those are a measurement.
+        if abs(f - 59.94) < 0.005:
+            return exact
+        if abs(f - 59.95) < 0.005:
+            # the two are 0.01 apart, so this test has to be tighter than the gap - see fps_fraction,
+            # where the same band was wide enough to swallow 59.95 whole
+            return trial
+        if f > 60:
+            return probe
+        return smooth if f in (30, 60) else hitch
+
+    return tuple("%g fps%s" % (f, note(f)) for f in protocol.FPS_CHOICES)
+
+
 def bitrate_labels() -> tuple[str, ...]:
     """Built on demand rather than at import: the word in brackets is translated, so the list has to be
     rebuilt whenever the language changes."""
@@ -176,17 +210,40 @@ ENTROPY_LABELS = ("CAVLC", "CABAC")
 ENTROPY_HINTS = ("The PS3 decodes CAVLC about 43 % faster – measured 22 ms instead of 36–40 ms at 720p",
                  "CABAC is slightly sharper per bit, but costs the PS3 considerably more decode time")
 
-SIZE_LABELS = ("1280 × 720", "1408 × 800", "1536 × 864", "1792 × 1008", "1920 × 1088")
-SIZE_HINTS = ("A good place to start – measured 22 ms decode on the PS3",
-              "A little sharper, about 1.2× the decode load",
-              "Noticeably sharper, about 1.4× the decode load",
-              "About 2× the decode load – a good middle ground",
-              "Full HD, about 2.3× the decode load – measured 38–44 ms with x264")
+def size_labels() -> tuple[str, ...]:
+    """Built from protocol.STREAM_SIZES rather than written out beside it.
 
-DISPLAY_LABELS = ("Leave it alone", "Optimise for capture", "Throttle to 60 Hz")
+    It used to be a hardcoded tuple, and the moment a size was added to STREAM_SIZES without it the
+    dropdown kept its old entries while every index shifted by one - picking "1280 × 720" set
+    960 × 544. Two lists that must agree is one list too many."""
+    return tuple("%d × %d" % size for size in protocol.STREAM_SIZES)
+# Keyed by the size itself, not by position. As a flat tuple this had gone wrong exactly the way the
+# labels above had: 960 × 544 was added to STREAM_SIZES and the tuple stayed five long, so every
+# explanation slid up by one place and Full HD - the last entry - got none at all and simply kept
+# whichever sentence had been standing there before. A size with no entry here is now visible as a
+# short, honest line instead of somebody else's sentence.
+SIZE_HINT_BY_SIZE = {
+    (960, 544):   "The lightest picture – the most decode time left over, at the cost of readable text",
+    (1280, 720):  "A good place to start – measured 22 ms decode on the PS3",
+    (1408, 800):  "A little sharper, about 1.2× the decode load",
+    (1536, 864):  "Noticeably sharper, about 1.4× the decode load",
+    (1792, 1008): "About 2× the decode load – a good middle ground",
+    (1920, 1080): "Full HD, about 2.3× the decode load – measured 38–44 ms with x264",
+}
+
+
+def size_hints() -> tuple[str, ...]:
+    """One explanation per entry of STREAM_SIZES, in that order - see SIZE_HINT_BY_SIZE."""
+    return tuple(SIZE_HINT_BY_SIZE.get(size, "%d × %d" % size) for size in protocol.STREAM_SIZES)
+
+# The names say what each one DOES to the desktop, in the order DISPLAY_STRATEGIES lists them.
+# "Throttle to 60 Hz" was the old name of the third one and described only half of it: it also puts the
+# desktop at the stream's own size, and that half turned out to be the one that made the picture sharp.
+DISPLAY_LABELS = ("Leave it alone", "Optimise for capture", "Same size & refresh rate", "Same size only")
 DISPLAY_HINTS = ("The desktop stays as it is – the stream is scaled down from its native mode",
-                 "Default: the highest refresh rate the capture can use – the most pictures",
-                 "Experiment: monitor at 60 Hz, so game, desktop and stream share one cadence")
+                 "The highest refresh rate the capture can use – the most pictures, but the stream is resized",
+                 "Default: the stream's size at a whole multiple of its rate – nothing resampled, nothing beating",
+                 "The stream's size at the fastest rate the screen has for it – sharp, but not locked in step")
 
 SLICE_LABELS = ("1 (default)", "2", "4")
 SLICE_HINTS = ("One picture in one piece – how everything so far was measured",
@@ -437,9 +494,16 @@ class MainWindow(Adw.ApplicationWindow):
         # what buy that time back.
         self.size_row = Adw.ComboRow(title=_("Resolution"),
                                     subtitle=_("Bigger means more readable text, but costs the PS3 roughly proportionally more decode time"),
-                                    model=Gtk.StringList.new([_(text) for text in SIZE_LABELS]))
+                                    model=Gtk.StringList.new(list(size_labels())))
         self.size_row.connect("notify::selected", self._on_size_selected)
         group.add(self.size_row)
+
+        self.fps_row = Adw.ComboRow(title=_("Frame rate"),
+                                    subtitle=_("The PS3 shows 59.94 pictures a second. 30 and 60 land evenly on that, "
+                                               "50 and 55 do not – they buy the console time per picture instead"),
+                                    model=Gtk.StringList.new(list(fps_labels())))
+        self.fps_row.connect("notify::selected", self._on_fps_selected)
+        group.add(self.fps_row)
 
         self.bitrate_row = Adw.ComboRow(title=_("Bitrate"),
                                         subtitle=_("Lower it when the picture judders on the PS3 – raise it only while it stays fluid"),
@@ -616,6 +680,20 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._server.loss_recovery = LOSS_RECOVERY_KINDS[index]
 
+    def _on_fps_selected(self, row, _pspec) -> None:
+        if self._syncing:
+            return
+        index = row.get_selected()
+        if index < 0 or index >= len(protocol.FPS_CHOICES):
+            return
+        if protocol.FPS_CHOICES[index] == self._server.stream_fps:
+            return
+        if self._server.is_ps3_connected:
+            log.write(_("video: end the stream first, then change the frame rate"))
+            self._sync_choices()
+            return
+        self._server.stream_fps = protocol.FPS_CHOICES[index]
+
     def _on_bitrate_selected(self, row, _pspec) -> None:
         if self._syncing:
             return
@@ -694,7 +772,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Each combo row explains its CURRENT choice underneath itself. The dropdown holds short names
         because GTK ellipsises a long selected value at any window size - the sentence goes here, where
         it always fits."""
-        for row, hints in ((self.size_row, SIZE_HINTS), (self.coder_row, ENTROPY_HINTS),
+        for row, hints in ((self.size_row, size_hints()), (self.coder_row, ENTROPY_HINTS),
                            (self.rate_row, RATE_HINTS), (self.recovery_row, LOSS_RECOVERY_HINTS),
                            (self.slice_row, SLICE_HINTS),
                            (self.display_row, DISPLAY_HINTS)):
@@ -746,20 +824,31 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_default_response("yes")
         dialog.set_close_response("no")
 
-        left = {"seconds": seconds, "done": False}
+        left = {"seconds": seconds, "done": False, "expired": False}
 
         def tick():
             if left["done"]:
                 return GLib.SOURCE_REMOVE
+            # answered somewhere else - by the user, or by the console proving it is receiving. Close
+            # without answering: this dialog no longer has anything to decide.
+            if display.is_confirmed:
+                left["done"] = left["expired"] = True
+                dialog.close()
+                return GLib.SOURCE_REMOVE
             left["seconds"] -= 1
             if left["seconds"] <= 0:
-                left["done"] = True
+                left["done"] = left["expired"] = True
                 dialog.close()      # display_mode is switching back on its own; just get out of the way
                 return GLib.SOURCE_REMOVE
             dialog.set_body(self._confirm_body(left["seconds"]))
             return GLib.SOURCE_CONTINUE
 
         def answered(_dialog, response):
+            # close_response is "no", so a dialog that closes ITSELF arrives here as a rejection. It is
+            # not one: nobody said no. Left unguarded this switched the desktop back a second time, and
+            # did it silently - in the log the mode simply went back with no reason given.
+            if left["expired"]:
+                return
             left["done"] = True
             if response == "yes":
                 display.confirm_visible()
@@ -921,6 +1010,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.encoder_row.set_sensitive(not locked and len(self._encoder_kinds) > 0)
         self.recovery_row.set_sensitive(not locked)
         self.size_row.set_sensitive(not locked)
+        self.fps_row.set_sensitive(not locked)
         self.bitrate_row.set_sensitive(not locked)
         self.coder_row.set_sensitive(not locked)
 
@@ -978,6 +1068,11 @@ class MainWindow(Adw.ApplicationWindow):
             index = protocol.STREAM_SIZES.index(size) if size in protocol.STREAM_SIZES else 0
             if self.size_row.get_selected() != index:
                 self.size_row.set_selected(index)
+
+            fps = server.stream_fps
+            index = protocol.FPS_CHOICES.index(fps) if fps in protocol.FPS_CHOICES else len(protocol.FPS_CHOICES) - 1
+            if self.fps_row.get_selected() != index:
+                self.fps_row.set_selected(index)
 
             kbps = server.video_kbps
             index = protocol.BITRATE_CHOICES_KBPS.index(kbps) if kbps in protocol.BITRATE_CHOICES_KBPS else 0

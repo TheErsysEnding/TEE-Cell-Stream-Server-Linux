@@ -10,6 +10,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG="tee-cell-stream-server"
 VERSION="$(python3 -c "import re,sys; print(re.search(r'__version__ = \"([^\"]+)\"', open('$ROOT/src/teecellstream/__init__.py').read()).group(1))")"
+EPOCH="$(python3 -c "import re,sys; m=re.search(r'DEB_EPOCH = \"([^\"]+)\"', open('$ROOT/src/teecellstream/__init__.py').read()); print(m.group(1) if m else '')")"
+# The epoch belongs in the control file, never in the file NAME: dpkg-deb writes a colon nowhere and
+# a filename with one is a nuisance on every filesystem that has an opinion about them.
+DEB_VERSION="${EPOCH:+$EPOCH:}$VERSION"
 STAGE="$ROOT/build/pkgroot"
 DIST="$ROOT/dist"
 DEB="$DIST/${PKG}_${VERSION}_all.deb"
@@ -56,7 +60,7 @@ chmod 644 "$STAGE/usr/share/doc/$PKG/changelog.gz"
 
 # --- control -----------------------------------------------------------------------------------------
 INSTALLED_KB="$(du -sk --exclude=DEBIAN "$STAGE" | cut -f1)"
-sed -e "s/@VERSION@/$VERSION/" -e "s/@INSTALLED_SIZE@/$INSTALLED_KB/" "$ROOT/packaging/control" > "$STAGE/DEBIAN/control"
+sed -e "s/@VERSION@/$DEB_VERSION/" -e "s/@INSTALLED_SIZE@/$INSTALLED_KB/" "$ROOT/packaging/control" > "$STAGE/DEBIAN/control"
 for script in postinst prerm postrm; do
    install -m 755 "$ROOT/packaging/$script" "$STAGE/DEBIAN/$script"
 done
