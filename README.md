@@ -152,6 +152,38 @@ back when the stream ends. Because a mode a monitor cannot show leaves a black s
 click anything, the switch is armed: a dialog asks you to confirm you can still see the picture, and if
 nothing is confirmed within 15 seconds the previous mode is restored by itself.
 
+## Frame rate buys latency; resolution buys decode time
+
+The two knobs do different jobs, and the session logs say so plainly. Taken across every rate that has
+been streamed to the console:
+
+| size | fps | frame gap | reported "decode" | minus the gap | display wait |
+|---|---|---|---|---|---|
+| 1920×1088 | 30 | 33.3 ms | 38.9 ms | **5.6 ms** | 0.0 ms |
+| 1920×1088 | 50 | 20.0 ms | 25.5 ms | **5.5 ms** | 0.0 ms |
+| 1920×1080 | 60 | 16.7 ms | 22.5 ms | **5.8 ms** | 0.0 ms |
+| 1280×720 | 120 | 8.3 ms | 12.1 ms | **3.8 ms** | 0.0 ms |
+| 1280×720 | 145 | 6.9 ms | 10.7 ms | **3.8 ms** | 7.8 ms |
+| 960×544 | 240 | 4.2 ms | 7.8 ms | **3.6 ms** | 7.4 ms |
+
+Subtract one frame interval from the reported decode time and what is left is 3.6–7.6 ms, at every rate
+and every resolution — Full HD included. What the stats panel calls `decode` is therefore mostly *waiting
+for the next picture*: the Cell's actual decoding work is under 8 ms even at 1080p.
+
+That is why frame rate moves latency so hard. Every stage of the chain hands over whole pictures, so every
+stage waits up to one interval; raise the rate and all of those waits shrink together. At 30 fps the
+console is not being given more time to work — it had plenty — only made to wait 33 ms per hand-off
+instead of 17. End to end: 41.9 ms against 26.2 ms.
+
+Two limits fall out of the same table. **The lowest latency measured is 1280×720 at 120 fps: 16.4 ms** —
+neither the highest rate nor the smallest picture. And **above about 120 fps it stops paying**: the
+`display wait` column is zero everywhere below and non-zero at 145 and 240, which is the console queueing
+at the flip because it cannot show more than 59.94 pictures a second. 240 fps ends up slower end to end
+(20.0 ms) than 120 (16.4 ms).
+
+So: to make the console work less, lower the **resolution**. To make the controller feel closer, raise the
+**frame rate** — up to about 120.
+
 ## The encoder decides what the console can do
 
 The PS3 decodes H.264 on its SPUs, and two encoder choices dominate everything else. Both were measured
