@@ -71,11 +71,12 @@ den nächsten Bildaufbau des Fernsehers zu warten. Daher kommt die niedrigste La
 eine Bruchkante: Der Bildschirm wird mitten im Aufbau neu beschrieben, und wo altes und neues Bild
 aufeinandertreffen, sieht man einen Saum.
 
-Die Kante *wandert*, und wie schnell, verrät den Grund. Gemessen über 61 saubere Sekunden: Die Konsole
-bekam 59,10 Bilder pro Sekunde bei einem 60-Hz-Fernseher, also 0,90 Differenz – die Kante wanderte
-demnach einmal alle 1,1 Sekunden durchs Bild, und genau so oft war sie zu sehen. Je näher die Bildrate
-an der des Fernsehers liegt, desto langsamer wandert sie; bei exakter Übereinstimmung steht sie still.
-Deshalb fällt sie auf manchen Anlagen gar nicht auf und auf anderen sofort.
+Wo die Kante sitzt, hängt davon ab, wo der Bildstrahl des Fernsehers gerade steht, wenn ein Bild
+fertig dekodiert ist – und die Dekodierzeit schwankt um einige Millisekunden, also steht sie nicht
+still. Beteiligt sind zwei Takte, und keiner davon lässt sich einstellen: Eine PS3 gibt an einen
+Fernseher **59,94 Hz** aus (das SDK kennt für 1080p und 720p überhaupt keinen 60-Hz-Modus, und eine
+Anwendung darf die Bildwiederholrate nicht wählen – das macht das System), während die Aufnahme am
+PC auf ihrem eigenen Takt mit 60,000 läuft. Die beiden driften also zwangsläufig gegeneinander.
 
 Am deutlichsten zeigt sie sich bei **stehendem Bild im Keyframe-Modus**. Aufeinanderfolgende
 Zwischenbilder wiederholen das vorige Bild fast exakt, eine Kante zwischen zweien davon sieht man

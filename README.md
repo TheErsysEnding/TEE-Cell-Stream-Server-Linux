@@ -74,11 +74,11 @@ In **vsync off** the console shows each picture the moment it is decoded, withou
 television's next refresh. That is where the lowest latency comes from, and it costs a tear: the
 display is repainted mid-picture, so a seam appears where the old and new frames meet.
 
-The seam *moves*, and how fast tells you what is happening. Measured over 61 seconds of a clean
-session: the console received 59.10 pictures per second against a 60 Hz display, a difference of
-0.90 — so the seam swept through the picture once every 1.1 seconds, which is exactly how often it
-was seen. Get the rate closer to the display's and the seam slows down; match it exactly and it
-stands still, which is why it is invisible on some setups and obvious on others.
+The seam's position depends on where the television's beam happens to be when a picture finishes
+decoding, and decode time varies by a few milliseconds, so it does not sit still. Two clocks are
+involved and neither can be adjusted: a PS3 outputs **59.94 Hz** to a TV (the SDK has no 60 Hz mode
+for 1080p or 720p at all, and an application cannot choose the refresh rate — the system sets it),
+while the PC's capture runs on its own clock at 60.000. They drift against each other by design.
 
 It shows up most on a **still** picture in keyframe mode. Consecutive predicted frames reproduce the
 previous picture almost exactly, so a seam between two of them is invisible — but a keyframe is coded
